@@ -23,12 +23,12 @@ spin = { version = "0.9", default-features = false, features = [
 ] }
 smallvec = { version = "1.10.0", features = ["union"] }
 multi-stash = { version = "0.2.0" }
+anyhow = "1.0"
+wat = "1"
 
 [dev-dependencies]
-wat = "1"
 assert_matches = "1.5"
 wast = "64.0"
-anyhow = "1.0"
 criterion = { version = "0.5", default-features = false }
 
 [features]
@@ -38,3 +38,7 @@ std = ["wasmi_core/std", "wasmi_arena/std", "wasmparser/std", "spin/std"]
 [[bench]]
 name = "benches"
 harness = false
+
+[[bin]]
+path = "bin/example.rs"
+name = "test_v1"
