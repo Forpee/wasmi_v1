@@ -109,7 +109,6 @@ pub fn execute_wasm<'ctx, 'engine>(
     resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
 ) -> Result<WasmOutcome, TrapCode> {
     println!("{:?}", code_map);
-    // panic!("panic");
     Executor::new(ctx, cache, value_stack, call_stack, code_map, const_pool)
         .execute(resource_limiter)
 }
@@ -214,7 +213,6 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
         resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
     ) -> Result<WasmOutcome, TrapCode> {
         use Instruction as Instr;
-        println!("{:?}", self.ip.get());
         loop {
             match *self.ip.get() {
                 Instr::LocalGet(local_depth) => self.visit_local_get(local_depth),

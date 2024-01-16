@@ -19,17 +19,17 @@ pub fn main() -> Result<()> {
     // // First step is to create the Wasm execution engine with some config.
     // // In this example we are using the default configuration.
     let engine = Engine::default();
-    let wat = r#"
-        (module
-            (func (export "main") (result i32)
-                i32.const 100
-                i32.const 20
-                i32.add
-                i32.const 100
-                i32.add
-            )
-        )
-    "#;
+    // let wat = r#"
+    //     (module
+    //         (func (export "main") (result i32)
+    //             i32.const 100
+    //             i32.const 20
+    //             i32.add
+    //             i32.const 100
+    //             i32.add
+    //         )
+    //     )
+    // "#;
     // // Wasmi does not yet support parsing `.wat` so we have to convert
     // // out `.wat` into `.wasm` before we compile and validate it.
     // let wasm = wat::parse_str(&wat)?;
