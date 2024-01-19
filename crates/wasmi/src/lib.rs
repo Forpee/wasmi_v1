@@ -100,6 +100,7 @@ mod module;
 mod reftype;
 mod store;
 mod table;
+mod tracer;
 mod value;
 
 /// Definitions from the `wasmi_core` crate.
@@ -162,6 +163,7 @@ pub use self::{
     },
     store::{AsContext, AsContextMut, Store, StoreContext, StoreContextMut},
     table::{Table, TableType},
+    tracer::Tracer,
     value::Value,
 };
 use self::{

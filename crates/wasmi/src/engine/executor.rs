@@ -108,7 +108,6 @@ pub fn execute_wasm<'ctx, 'engine>(
     const_pool: ConstPoolView<'engine>,
     resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
 ) -> Result<WasmOutcome, TrapCode> {
-    println!("{:?}", code_map);
     Executor::new(ctx, cache, value_stack, call_stack, code_map, const_pool)
         .execute(resource_limiter)
 }

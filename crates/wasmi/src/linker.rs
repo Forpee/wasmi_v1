@@ -17,6 +17,7 @@ use crate::{
     MemoryType,
     Module,
     TableType,
+    Tracer,
     Value,
 };
 use alloc::{
@@ -30,7 +31,7 @@ use core::{
     num::NonZeroUsize,
     ops::Deref,
 };
-
+use std::{cell::RefCell, rc::Rc};
 /// An error that may occur upon operating with [`Linker`] instances.
 #[derive(Debug)]
 pub enum LinkerError {
@@ -656,6 +657,32 @@ impl<T> Linker<T> {
             .map(|import| self.process_import(&mut context, import))
             .collect::<Result<Vec<Extern>, Error>>()?;
         module.instantiate(context, externals)
+    }
+
+    /// Instantiates the given [`Module`] using the definitions in the [`Linker`].
+    ///
+    /// # Panics
+    ///
+    /// If the [`Engine`] of the [`Linker`] and `context` are not the same.
+    ///
+    /// # Errors
+    ///
+    /// - If the linker does not define imports of the instantiated [`Module`].
+    /// - If any imported item does not satisfy its type requirements.
+    pub fn instantiate_with_tracer(
+        &self,
+        mut context: impl AsContextMut<UserState = T>,
+        module: &Module,
+        tracer: Rc<RefCell<Tracer>>,
+    ) -> Result<InstancePre, Error> {
+        assert!(Engine::same(self.engine(), context.as_context().engine()));
+        // TODO: possibly add further resource limtation here on number of externals.
+        // Not clear that user can't import the same external lots of times to inflate this.
+        let externals = module
+            .imports()
+            .map(|import| self.process_import(&mut context, import))
+            .collect::<Result<Vec<Extern>, Error>>()?;
+        module.instantiate_with_tracer(context, externals, tracer)
     }
 
     /// Processes a single [`Module`] import.
