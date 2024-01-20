@@ -29,6 +29,7 @@ use crate::{
         ValueStack,
     },
     error::EntityGrowError,
+    etable::{BinOp, RunInstructionTracePre, StepInfo},
     func::FuncEntity,
     store::ResourceLimiterRef,
     table::TableEntity,
@@ -38,8 +39,10 @@ use crate::{
     Instance,
     StoreInner,
     Table,
+    Tracer,
 };
 use core::cmp::{self};
+use std::{cell::RefCell, rc::Rc};
 use wasmi_core::{Pages, UntypedValue};
 
 /// The outcome of a Wasm execution.
@@ -108,8 +111,49 @@ pub fn execute_wasm<'ctx, 'engine>(
     const_pool: ConstPoolView<'engine>,
     resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
 ) -> Result<WasmOutcome, TrapCode> {
-    Executor::new(ctx, cache, value_stack, call_stack, code_map, const_pool)
-        .execute(resource_limiter)
+    Executor::new(
+        ctx,
+        cache,
+        value_stack,
+        call_stack,
+        code_map,
+        const_pool,
+        None,
+    )
+    .execute(resource_limiter)
+}
+
+/// Executes the given function `frame`.
+///
+/// # Note
+///
+/// This executes Wasm instructions until either the execution calls
+/// into a host function or the Wasm execution has come to an end.
+///
+/// # Errors
+///
+/// If the Wasm execution traps.
+#[inline(never)]
+pub fn execute_wasm_with_trace<'ctx, 'engine>(
+    ctx: &'ctx mut StoreInner,
+    cache: &'engine mut InstanceCache,
+    value_stack: &'engine mut ValueStack,
+    call_stack: &'engine mut CallStack,
+    code_map: &'engine CodeMap,
+    const_pool: ConstPoolView<'engine>,
+    resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
+    tracer: Rc<RefCell<Tracer>>,
+) -> Result<WasmOutcome, TrapCode> {
+    Executor::new(
+        ctx,
+        cache,
+        value_stack,
+        call_stack,
+        code_map,
+        const_pool,
+        Some(tracer),
+    )
+    .execute(resource_limiter)
 }
 
 /// The function signature of Wasm load operations.
@@ -162,6 +206,8 @@ struct Executor<'ctx, 'engine> {
     code_map: &'engine CodeMap,
     /// A read-only view to a pool of constant values.
     const_pool: ConstPoolView<'engine>,
+
+    tracer: Option<Rc<RefCell<Tracer>>>,
 }
 
 macro_rules! forward_call {
@@ -189,6 +235,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
         call_stack: &'engine mut CallStack,
         code_map: &'engine CodeMap,
         const_pool: ConstPoolView<'engine>,
+        tracer: Option<Rc<RefCell<Tracer>>>,
     ) -> Self {
         let frame = call_stack.pop().expect("must have frame on the call stack");
         let sp = value_stack.stack_ptr();
@@ -202,6 +249,54 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             call_stack,
             code_map,
             const_pool,
+            tracer,
+        }
+    }
+    fn get_tracer_if_active(&self) -> Option<Rc<RefCell<Tracer>>> {
+        if self.tracer.is_some() {
+            self.tracer.clone()
+        } else {
+            None
+        }
+    }
+
+    fn execute_instruction_pre(&self, instruction: &Instruction) -> Option<RunInstructionTracePre> {
+        match *instruction {
+            Instruction::LocalGet(..) => None,
+            Instruction::Const32(_) => None,
+            Instruction::I32Add => Some(RunInstructionTracePre::I32BinOp {
+                left: self.sp.nth_back(2).to_bits() as i32,
+                right: self.sp.nth_back(1).to_bits() as i32,
+            }),
+            _ => None,
+        }
+    }
+
+    fn execute_instruction_post(
+        &self,
+        pre_status: Option<RunInstructionTracePre>,
+        instruction: &Instruction,
+    ) -> StepInfo {
+        match *instruction {
+            Instruction::Const32(value) => StepInfo::I32Const {
+                value: i32::from_ne_bytes(value),
+            },
+            Instruction::I32Add => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => {
+                println!("{:?}", instruction);
+                unimplemented!()
+            }
         }
     }
 
@@ -213,7 +308,25 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
     ) -> Result<WasmOutcome, TrapCode> {
         use Instruction as Instr;
         loop {
-            match *self.ip.get() {
+            let instruction = self.ip.get();
+            let instruction_copy = instruction.clone();
+            let pre_status = self.execute_instruction_pre(&instruction);
+
+            macro_rules! trace_post {
+                () => {{
+                    if self.tracer.is_some() {
+                        if let Some(tracer) = self.get_tracer_if_active() {
+                            let mut tracer = tracer.borrow_mut();
+                            let post_status =
+                                self.execute_instruction_post(pre_status, &instruction_copy);
+                            tracer.etable.push(post_status);
+                        }
+                        // println!("{:?}, {:?}", instruction_copy, self.sp.last());
+                    }
+                }};
+            }
+
+            match *instruction {
                 Instr::LocalGet(local_depth) => self.visit_local_get(local_depth),
                 Instr::LocalSet(local_depth) => self.visit_local_set(local_depth),
                 Instr::LocalTee(local_depth) => self.visit_local_tee(local_depth),
@@ -427,7 +540,8 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 Instr::I64Extend8S => self.visit_i64_extend8_s(),
                 Instr::I64Extend16S => self.visit_i64_extend16_s(),
                 Instr::I64Extend32S => self.visit_i64_extend32_s(),
-            }
+            };
+            trace_post!();
         }
     }
 

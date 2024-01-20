@@ -163,7 +163,7 @@ pub use self::{
     },
     store::{AsContext, AsContextMut, Store, StoreContext, StoreContextMut},
     table::{Table, TableType},
-    tracer::Tracer,
+    tracer::{etable, Tracer},
     value::Value,
 };
 use self::{

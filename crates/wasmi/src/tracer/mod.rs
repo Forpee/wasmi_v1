@@ -1,18 +1,25 @@
+pub mod etable;
 mod imtable;
 use wasmi_core::UntypedValue;
 
 use crate::{AsContext, Global, Memory};
 
-use self::imtable::{IMTable, VarType};
+use self::{
+    etable::ETable,
+    imtable::{IMTable, VarType},
+};
 
+#[derive(Debug)]
 pub struct Tracer {
     pub imtable: IMTable,
+    pub etable: ETable,
 }
 
 impl Tracer {
     pub fn new() -> Self {
         Tracer {
             imtable: IMTable::default(),
+            etable: ETable::default(),
         }
     }
 
