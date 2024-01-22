@@ -621,11 +621,11 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::F64Const32(_) => None,
 
             Instruction::I32Eqz => Some(RunInstructionTracePre::I32Single(
-                self.sp.last().to_bits() as i32,
+                self.sp.last().into(),
             )),
 
             Instruction::I64Eqz => Some(RunInstructionTracePre::I64Single(
-                self.sp.last().to_bits() as i64,
+                self.sp.last().into(),
             )),
 
             Instruction::I32Eq
