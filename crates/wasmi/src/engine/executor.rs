@@ -2727,6 +2727,10 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             let instruction = unsafe { &*self.ip.ptr };
             let instruction_copy = instruction.clone();
             let pre_status = self.execute_instruction_pre(&instruction);
+            let memory = self.cache.default_memory(self.ctx);
+            let memref = self.ctx.resolve_memory(&memory);
+            let pages = memref.current_pages().to_bytes();
+
             macro_rules! trace_post {
                 () => {{
                     if self.tracer.is_some() {
@@ -2734,7 +2738,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                             let mut tracer = tracer.borrow_mut();
                             let post_status =
                                 self.execute_instruction_post(pre_status, &instruction_copy);
-                            tracer.etable.push(post_status);
+                            tracer.etable.push(pages, post_status);
                         }
                     }
                 }};

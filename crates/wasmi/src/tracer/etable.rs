@@ -623,8 +623,7 @@ pub enum StepInfo {
 #[derive(Debug, Clone)]
 pub struct ETEntry {
     eid: u32,
-    // sp: u32,
-    // allocated_memory_pages: u32,
+    allocated_memory_pages: usize,
     step_info: StepInfo,
 }
 #[derive(Debug, Default)]
@@ -638,11 +637,11 @@ impl ETable {
     pub fn entries_mut(&mut self) -> &mut Vec<ETEntry> {
         &mut self.0
     }
-    pub fn push(&mut self, step_info: StepInfo) {
+    pub fn push(&mut self, allocated_memory_pages: Option<usize>, step_info: StepInfo) {
+        let allocated_memory_pages = allocated_memory_pages.unwrap_or(0);
         let et_entry = ETEntry {
             eid: (self.entries().len() + 1).try_into().unwrap(),
-            // sp,
-            // allocated_memory_pages,
+            allocated_memory_pages,
             step_info,
         };
 
