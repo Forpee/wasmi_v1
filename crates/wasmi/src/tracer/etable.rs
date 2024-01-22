@@ -622,9 +622,9 @@ pub enum StepInfo {
 
 #[derive(Debug, Clone)]
 pub struct ETEntry {
-    eid: u32,
-    allocated_memory_pages: usize,
-    step_info: StepInfo,
+    pub eid: u32,
+    pub allocated_memory_pages: usize,
+    pub step_info: StepInfo,
 }
 #[derive(Debug, Default)]
 pub struct ETable(Vec<ETEntry>);
