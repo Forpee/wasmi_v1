@@ -29,10 +29,21 @@ use crate::{
         ValueStack,
     },
     error::EntityGrowError,
-    etable::{BinOp, RunInstructionTracePre, StepInfo},
+    etable::{
+        from_untyped_value_to_u64_with_typ,
+        BinOp,
+        BitOp,
+        RelOp,
+        RunInstructionTracePre,
+        ShiftOp,
+        StepInfo,
+        UnaryOp,
+        VarType,
+    },
     func::FuncEntity,
     store::ResourceLimiterRef,
     table::TableEntity,
+    tracer::imtable::{MemoryReadSize, MemoryStoreSize},
     FuelConsumptionMode,
     Func,
     FuncRef,
@@ -41,9 +52,12 @@ use crate::{
     Table,
     Tracer,
 };
-use core::cmp::{self};
+use core::{
+    any::Any,
+    cmp::{self},
+};
 use std::{cell::RefCell, rc::Rc};
-use wasmi_core::{Pages, UntypedValue};
+use wasmi_core::{effective_address, Pages, UntypedValue, F32};
 
 /// The outcome of a Wasm execution.
 ///
@@ -260,27 +274,1386 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
         }
     }
 
-    fn execute_instruction_pre(&self, instruction: &Instruction) -> Option<RunInstructionTracePre> {
+    fn execute_instruction_pre(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Option<RunInstructionTracePre> {
         match *instruction {
             Instruction::LocalGet(..) => None,
+            Instruction::LocalSet(depth) => {
+                let value = self.sp.last();
+                Some(RunInstructionTracePre::SetLocal {
+                    depth: depth.to_usize(),
+                    value,
+                })
+            }
+            Instruction::LocalTee(..) => None,
+            Instruction::GlobalGet(..) => None,
+            Instruction::GlobalSet(idx) => {
+                let value = self.sp.last();
+                Some(RunInstructionTracePre::SetGlobal {
+                    idx: idx.to_u32(),
+                    value,
+                })
+            }
+
+            Instruction::Br(_) => None,
+            Instruction::BrIfEqz(_) => Some(RunInstructionTracePre::BrIfEqz {
+                value: self.sp.last().into(),
+            }),
+            Instruction::BrIfNez(_) => Some(RunInstructionTracePre::BrIfNez {
+                value: self.sp.last().into(),
+            }),
+            Instruction::BrTable(_) => Some(RunInstructionTracePre::BrTable {
+                index: self.sp.last().into(),
+            }),
+
+            Instruction::Return(drop_keep) => {
+                let mut drop_values = vec![];
+                let mut keep_values: Vec<u64> = vec![];
+
+                let drop = drop_keep.drop();
+                let keep = drop_keep.keep();
+
+                for i in 1..=drop {
+                    drop_values.push(self.sp.nth_back(i.into()));
+                }
+
+                for i in drop + 1..=drop + keep {
+                    keep_values.push(self.sp.nth_back(i.into()).into());
+                }
+
+                Some(RunInstructionTracePre::Return {
+                    drop: drop.into(),
+                    keep_values,
+                })
+            }
+
+            Instruction::CallInternal(_) => None,
+
+            Instruction::Drop => None,
+            Instruction::Select => Some(RunInstructionTracePre::Select {
+                cond: self.sp.nth_back(1).into(),
+                val2: self.sp.nth_back(2).into(),
+                val1: self.sp.nth_back(3).into(),
+            }),
+
+            Instruction::I32Load(offset)
+            | Instruction::I32Load8S(offset)
+            | Instruction::I32Load8U(offset)
+            | Instruction::I32Load16S(offset)
+            | Instruction::I32Load16U(offset) => {
+                let load_size = match *instruction {
+                    Instruction::I32Load(..) => MemoryReadSize::U32,
+                    Instruction::I32Load8S(..) => MemoryReadSize::S8,
+                    Instruction::I32Load8U(..) => MemoryReadSize::U8,
+                    Instruction::I32Load16S(..) => MemoryReadSize::S16,
+                    Instruction::I32Load16U(..) => MemoryReadSize::U16,
+                    _ => unreachable!(),
+                };
+
+                let raw_address = u32::from(self.sp.last());
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                Some(RunInstructionTracePre::Load {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    vtype: VarType::I32,
+                    load_size,
+                })
+            }
+
+            Instruction::I64Load(offset)
+            | Instruction::I64Load8S(offset)
+            | Instruction::I64Load8U(offset)
+            | Instruction::I64Load16S(offset)
+            | Instruction::I64Load16U(offset)
+            | Instruction::I64Load32S(offset)
+            | Instruction::I64Load32U(offset) => {
+                let load_size = match *instruction {
+                    Instruction::I64Load(..) => MemoryReadSize::I64,
+                    Instruction::I64Load8S(..) => MemoryReadSize::S8,
+                    Instruction::I64Load8U(..) => MemoryReadSize::U8,
+                    Instruction::I64Load16S(..) => MemoryReadSize::S16,
+                    Instruction::I64Load16U(..) => MemoryReadSize::U16,
+                    Instruction::I64Load32S(..) => MemoryReadSize::S32,
+                    Instruction::I64Load32U(..) => MemoryReadSize::U32,
+                    _ => unreachable!(),
+                };
+                let raw_address = u32::from(self.sp.last());
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                Some(RunInstructionTracePre::Load {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    vtype: VarType::I64,
+                    load_size,
+                })
+            }
+
+            Instruction::F32Load(offset) | Instruction::F64Load(offset) => {
+                let load_size = match instruction {
+                    Instruction::F32Load(..) => MemoryReadSize::F32,
+                    Instruction::F64Load(..) => MemoryReadSize::F64,
+                    _ => unreachable!(),
+                };
+                let vtype = match instruction {
+                    Instruction::F32Load(..) => VarType::F32,
+                    Instruction::F64Load(..) => VarType::F64,
+                    _ => unreachable!(),
+                };
+
+                let raw_address = u32::from(self.sp.last());
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                Some(RunInstructionTracePre::Load {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    vtype,
+                    load_size,
+                })
+            }
+
+            Instruction::I32Store(offset)
+            | Instruction::I32Store8(offset)
+            | Instruction::I32Store16(offset) => {
+                let store_size = match *instruction {
+                    Instruction::I32Store8(_) => MemoryStoreSize::Byte8,
+                    Instruction::I32Store16(_) => MemoryStoreSize::Byte16,
+                    Instruction::I32Store(_) => MemoryStoreSize::Byte32,
+                    _ => unreachable!(),
+                };
+
+                let value: u32 = self.sp.nth_back(1).into();
+                let raw_address: u32 = self.sp.nth_back(2).into();
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                let pre_block_value1 = address.map(|address| {
+                    let mut buf = [0u8; 8];
+                    let memory = self.cache.default_memory(self.ctx);
+                    let memref = self.ctx.resolve_memory(&memory);
+                    memref.read(address / 8 * 8, &mut buf).unwrap();
+                    u64::from_le_bytes(buf)
+                });
+
+                let pre_block_value2 = address
+                    .map(|address| {
+                        if store_size.byte_size() + address % 8 > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref.read((address / 8 + 1) * 8, &mut buf).unwrap();
+                            Some(u64::from_le_bytes(buf))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten();
+
+                Some(RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    value: value as u64,
+                    vtype: VarType::I32,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                })
+            }
+
+            Instruction::I64Store(offset)
+            | Instruction::I64Store8(offset)
+            | Instruction::I64Store16(offset)
+            | Instruction::I64Store32(offset) => {
+                let store_size = match *instruction {
+                    Instruction::I64Store(..) => MemoryStoreSize::Byte64,
+                    Instruction::I64Store8(..) => MemoryStoreSize::Byte8,
+                    Instruction::I64Store16(..) => MemoryStoreSize::Byte16,
+                    Instruction::I64Store32(..) => MemoryStoreSize::Byte32,
+                    _ => unreachable!(),
+                };
+
+                let value: u64 = self.sp.nth_back(1).into();
+                let raw_address: u32 = self.sp.nth_back(2).into();
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                let pre_block_value1 = address.map(|address| {
+                    let mut buf = [0u8; 8];
+                    let memory = self.cache.default_memory(self.ctx);
+                    let memref = self.ctx.resolve_memory(&memory);
+                    memref.read(address / 8 * 8, &mut buf).unwrap();
+                    u64::from_le_bytes(buf)
+                });
+
+                let pre_block_value2 = address
+                    .map(|address| {
+                        if store_size.byte_size() + address % 8 > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref.read((address / 8 + 1) * 8, &mut buf).unwrap();
+                            Some(u64::from_le_bytes(buf))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten();
+
+                Some(RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    value,
+                    vtype: VarType::I64,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                })
+            }
+
+            Instruction::F32Store(offset) => {
+                let store_size = MemoryStoreSize::Byte32;
+
+                let value: u32 = self.sp.nth_back(1).into();
+                let raw_address: u32 = self.sp.nth_back(2).into();
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                let pre_block_value1 = address.map(|address| {
+                    let mut buf = [0u8; 8];
+                    let memory = self.cache.default_memory(self.ctx);
+                    let memref = self.ctx.resolve_memory(&memory);
+                    memref.read(address / 8 * 8, &mut buf).unwrap();
+                    u64::from_le_bytes(buf)
+                });
+
+                let pre_block_value2 = address
+                    .map(|address| {
+                        if store_size.byte_size() + address % 8 > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref.read((address / 8 + 1) * 8, &mut buf).unwrap();
+                            Some(u64::from_le_bytes(buf))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten();
+
+                Some(RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    value: value as u64,
+                    vtype: VarType::F32,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                })
+            }
+
+            Instruction::F64Store(offset) => {
+                let store_size = MemoryStoreSize::Byte64;
+
+                let value: u64 = self.sp.nth_back(1).into();
+                let raw_address: u32 = self.sp.nth_back(2).into();
+                let offset = offset.into_inner();
+                let address =
+                    effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
+
+                let pre_block_value1 = address.map(|address| {
+                    let mut buf = [0u8; 8];
+                    let memory = self.cache.default_memory(self.ctx);
+                    let memref = self.ctx.resolve_memory(&memory);
+                    memref.read(address / 8 * 8, &mut buf).unwrap();
+                    u64::from_le_bytes(buf)
+                });
+
+                let pre_block_value2 = address
+                    .map(|address| {
+                        if store_size.byte_size() + address % 8 > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref.read((address / 8 + 1) * 8, &mut buf).unwrap();
+                            Some(u64::from_le_bytes(buf))
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten();
+
+                Some(RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address: address,
+                    value: value,
+                    vtype: VarType::F64,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                })
+            }
+
+            Instruction::MemorySize => None,
+            Instruction::MemoryGrow => {
+                Some(RunInstructionTracePre::GrowMemory(self.sp.last().into()))
+            }
+            Instruction::ConstRef(_) => None,
             Instruction::Const32(_) => None,
-            Instruction::I32Add => Some(RunInstructionTracePre::I32BinOp {
+            Instruction::I64Const32(_) => None,
+            Instruction::F64Const32(_) => None,
+
+            Instruction::I32Eqz => Some(RunInstructionTracePre::I32Single(
+                self.sp.last().to_bits() as i32,
+            )),
+
+            Instruction::I64Eqz => Some(RunInstructionTracePre::I64Single(
+                self.sp.last().to_bits() as i64,
+            )),
+
+            Instruction::I32Eq
+            | Instruction::I32Ne
+            | Instruction::I32LtS
+            | Instruction::I32LtU
+            | Instruction::I32GtS
+            | Instruction::I32GtU
+            | Instruction::I32LeS
+            | Instruction::I32LeU
+            | Instruction::I32GeS
+            | Instruction::I32GeU => Some(RunInstructionTracePre::I32Comp {
                 left: self.sp.nth_back(2).to_bits() as i32,
                 right: self.sp.nth_back(1).to_bits() as i32,
             }),
+
+            Instruction::I64Eq
+            | Instruction::I64Ne
+            | Instruction::I64LtS
+            | Instruction::I64LtU
+            | Instruction::I64GtS
+            | Instruction::I64GtU
+            | Instruction::I64LeS
+            | Instruction::I64LeU
+            | Instruction::I64GeS
+            | Instruction::I64GeU => Some(RunInstructionTracePre::I64Comp {
+                left: self.sp.nth_back(2).to_bits() as i64,
+                right: self.sp.nth_back(1).to_bits() as i64,
+            }),
+
+            Instruction::F32Eq
+            | Instruction::F32Ne
+            | Instruction::F32Lt
+            | Instruction::F32Gt
+            | Instruction::F32Le
+            | Instruction::F32Ge => Some(RunInstructionTracePre::F32Comp {
+                left: self.sp.nth_back(2).to_bits() as f32,
+                right: self.sp.nth_back(1).to_bits() as f32,
+            }),
+
+            Instruction::F64Eq
+            | Instruction::F64Ne
+            | Instruction::F64Lt
+            | Instruction::F64Gt
+            | Instruction::F64Le
+            | Instruction::F64Ge => Some(RunInstructionTracePre::F64Comp {
+                left: self.sp.nth_back(2).to_bits() as f64,
+                right: self.sp.nth_back(1).to_bits() as f64,
+            }),
+
+            Instruction::I32Add
+            | Instruction::I32Sub
+            | Instruction::I32Mul
+            | Instruction::I32DivS
+            | Instruction::I32DivU
+            | Instruction::I32RemS
+            | Instruction::I32RemU
+            | Instruction::I32And
+            | Instruction::I32Or
+            | Instruction::I32Xor
+            | Instruction::I32Shl
+            | Instruction::I32ShrS
+            | Instruction::I32ShrU
+            | Instruction::I32Rotl
+            | Instruction::I32Rotr => Some(RunInstructionTracePre::I32BinOp {
+                left: self.sp.nth_back(2).to_bits() as i32,
+                right: self.sp.nth_back(1).to_bits() as i32,
+            }),
+
+            Instruction::I64Add
+            | Instruction::I64Sub
+            | Instruction::I64Mul
+            | Instruction::I64DivS
+            | Instruction::I64DivU
+            | Instruction::I64RemS
+            | Instruction::I64RemU
+            | Instruction::I64And
+            | Instruction::I64Or
+            | Instruction::I64Xor
+            | Instruction::I64Shl
+            | Instruction::I64ShrS
+            | Instruction::I64ShrU
+            | Instruction::I64Rotl
+            | Instruction::I64Rotr => Some(RunInstructionTracePre::I64BinOp {
+                left: self.sp.nth_back(2).to_bits() as i64,
+                right: self.sp.nth_back(1).to_bits() as i64,
+            }),
+
+            Instruction::F32Abs
+            | Instruction::F32Neg
+            | Instruction::F32Ceil
+            | Instruction::F32Floor
+            | Instruction::F32Trunc
+            | Instruction::F32Nearest
+            | Instruction::F32Sqrt => Some(RunInstructionTracePre::UnaryOp {
+                operand: from_untyped_value_to_u64_with_typ(VarType::F32, self.sp.last()),
+                vtype: VarType::F32,
+            }),
+
+            Instruction::F64Abs
+            | Instruction::F64Neg
+            | Instruction::F64Ceil
+            | Instruction::F64Floor
+            | Instruction::F64Trunc
+            | Instruction::F64Nearest
+            | Instruction::F64Sqrt => Some(RunInstructionTracePre::UnaryOp {
+                operand: from_untyped_value_to_u64_with_typ(VarType::F64, self.sp.last()),
+                vtype: VarType::F64,
+            }),
+
+            Instruction::F32Add
+            | Instruction::F32Sub
+            | Instruction::F32Mul
+            | Instruction::F32Div
+            | Instruction::F32Min
+            | Instruction::F32Max
+            | Instruction::F32Copysign => Some(RunInstructionTracePre::F32BinOp {
+                left: self.sp.nth_back(2).to_bits() as f32,
+                right: self.sp.nth_back(1).to_bits() as f32,
+            }),
+
+            Instruction::F64Add
+            | Instruction::F64Sub
+            | Instruction::F64Mul
+            | Instruction::F64Div
+            | Instruction::F64Min
+            | Instruction::F64Max
+            | Instruction::F64Copysign => Some(RunInstructionTracePre::F64BinOp {
+                left: self.sp.nth_back(2).to_bits() as f64,
+                right: self.sp.nth_back(1).to_bits() as f64,
+            }),
+
+            Instruction::I32Ctz | Instruction::I32Clz | Instruction::I32Popcnt => {
+                Some(RunInstructionTracePre::UnaryOp {
+                    operand: from_untyped_value_to_u64_with_typ(VarType::I32, self.sp.last()),
+                    vtype: VarType::I32,
+                })
+            }
+            Instruction::I64Ctz | Instruction::I64Clz | Instruction::I64Popcnt => {
+                Some(RunInstructionTracePre::UnaryOp {
+                    operand: from_untyped_value_to_u64_with_typ(VarType::I64, self.sp.last()),
+                    vtype: VarType::I64,
+                })
+            }
+
+            Instruction::I32WrapI64 => Some(RunInstructionTracePre::I32WrapI64 {
+                value: i64::from(self.sp.last()),
+            }),
+
+            Instruction::I32TruncF32S => Some(RunInstructionTracePre::I32TruncF32 {
+                value: f32::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::I32TruncF32U => Some(RunInstructionTracePre::I32TruncF32 {
+                value: f32::from(self.sp.last()),
+                sign: false,
+            }),
+            Instruction::I32TruncF64S => Some(RunInstructionTracePre::I32TruncF64 {
+                value: f64::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::I32TruncF64U => Some(RunInstructionTracePre::I32TruncF64 {
+                value: f64::from(self.sp.last()),
+                sign: false,
+            }),
+
+            Instruction::I64TruncF32S => Some(RunInstructionTracePre::I64TruncF32 {
+                value: f32::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::I64TruncF32U => Some(RunInstructionTracePre::I64TruncF32 {
+                value: f32::from(self.sp.last()),
+                sign: false,
+            }),
+            Instruction::I64TruncF64S => Some(RunInstructionTracePre::I64TruncF64 {
+                value: f64::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::I64TruncF64U => Some(RunInstructionTracePre::I64TruncF64 {
+                value: f64::from(self.sp.last()),
+                sign: false,
+            }),
+
+            Instruction::F32ConvertI32S => Some(RunInstructionTracePre::F32ConvertI32 {
+                value: i32::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::F32ConvertI32U => Some(RunInstructionTracePre::F32ConvertI32 {
+                value: i32::from(self.sp.last()),
+                sign: false,
+            }),
+            Instruction::F32ConvertI64S => Some(RunInstructionTracePre::F32ConvertI64 {
+                value: i64::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::F32ConvertI64U => Some(RunInstructionTracePre::F32ConvertI64 {
+                value: i64::from(self.sp.last()),
+                sign: false,
+            }),
+
+            Instruction::F32DemoteF64 => Some(RunInstructionTracePre::F32DemoteF64 {
+                value: f64::from(self.sp.last()),
+            }),
+
+            Instruction::F64ConvertI32S => Some(RunInstructionTracePre::F64ConvertI32 {
+                value: i32::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::F64ConvertI32U => Some(RunInstructionTracePre::F64ConvertI32 {
+                value: i32::from(self.sp.last()),
+                sign: false,
+            }),
+            Instruction::F64ConvertI64S => Some(RunInstructionTracePre::F64ConvertI64 {
+                value: i64::from(self.sp.last()),
+                sign: true,
+            }),
+
+            Instruction::F64ConvertI64U => Some(RunInstructionTracePre::F64ConvertI64 {
+                value: i64::from(self.sp.last()),
+                sign: false,
+            }),
+
+            Instruction::F64PromoteF32 => Some(RunInstructionTracePre::F64PromoteF32 {
+                value: f32::from(self.sp.last()),
+            }),
+
+            // Instruction::I32ReinterpretF32 => Some(RunInstructionTracePre::I32ReinterpretF32 {
+            //     value: f32::from(self.sp.last()),
+            // }),
+            // Instruction::I64ReinterpretF64 => Some(RunInstructionTracePre::I64ReinterpretF64 {
+            //     value: f32::from(self.sp.last()),
+            // }),
+            // Instruction::F32ReinterpretI32 => Some(RunInstructionTracePre::F32ReinterpretI32 {
+            //     value: f32::from(self.sp.last()),
+            // }),
+            // Instruction::F64ReinterpretI64 => Some(RunInstructionTracePre::F64ReinterpretI64 {
+            //     value: f32::from(self.sp.last()),
+            // }),
+            Instruction::I64ExtendI32U => Some(RunInstructionTracePre::I64ExtendI32 {
+                value: i32::from(self.sp.last()),
+                sign: false,
+            }),
+            Instruction::I64ExtendI32S => Some(RunInstructionTracePre::I64ExtendI32 {
+                value: i32::from(self.sp.last()),
+                sign: true,
+            }),
+            Instruction::I32Extend8S => Some(RunInstructionTracePre::I32SignExtendI8 {
+                value: i32::from(self.sp.last()),
+            }),
+            Instruction::I32Extend16S => Some(RunInstructionTracePre::I32SignExtendI16 {
+                value: i32::from(self.sp.last()),
+            }),
+            Instruction::I64Extend8S => Some(RunInstructionTracePre::I64SignExtendI8 {
+                value: i64::from(self.sp.last()),
+            }),
+            Instruction::I64Extend16S => Some(RunInstructionTracePre::I64SignExtendI16 {
+                value: i64::from(self.sp.last()),
+            }),
+            Instruction::I64Extend32S => Some(RunInstructionTracePre::I64SignExtendI32 {
+                value: i64::from(self.sp.last()),
+            }),
+
             _ => None,
         }
     }
 
     fn execute_instruction_post(
-        &self,
+        &mut self,
         pre_status: Option<RunInstructionTracePre>,
         instruction: &Instruction,
     ) -> StepInfo {
         match *instruction {
-            Instruction::Const32(value) => StepInfo::I32Const {
-                value: i32::from_ne_bytes(value),
+            Instruction::LocalGet(local_depth) => StepInfo::LocalGet {
+                depth: local_depth.to_usize(),
+                value: self.sp.last().to_bits(),
             },
+            Instruction::LocalSet(..) => {
+                if let RunInstructionTracePre::SetLocal { depth, value } = pre_status.unwrap() {
+                    StepInfo::SetLocal {
+                        depth,
+                        value: value.into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::LocalTee(depth) => StepInfo::TeeLocal {
+                depth: depth.to_usize(),
+                value: self.sp.last().into(),
+            },
+            Instruction::GlobalGet(idx) => {
+                let global_ref = self.cache.get_global(self.ctx, idx);
+                StepInfo::GetGlobal {
+                    idx: idx.to_u32(),
+                    value: global_ref.into(),
+                }
+            }
+            Instruction::GlobalSet(idx) => {
+                let global_ref = self.cache.get_global(self.ctx, idx);
+
+                StepInfo::SetGlobal {
+                    idx: idx.to_u32(),
+                    value: global_ref.into(),
+                }
+            }
+
+            Instruction::Br(target) => StepInfo::Br {
+                offset: target.to_i32(),
+            },
+            Instruction::BrIfEqz(target) => {
+                if let RunInstructionTracePre::BrIfEqz { value } = pre_status.unwrap() {
+                    StepInfo::BrIfEqz {
+                        condition: value,
+                        offset: target.to_i32(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::BrIfNez(target) => {
+                if let RunInstructionTracePre::BrIfNez { value } = pre_status.unwrap() {
+                    StepInfo::BrIfNez {
+                        condition: value,
+                        offset: target.to_i32(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::BrTable(targets) => {
+                if let RunInstructionTracePre::BrTable { index } = pre_status.unwrap() {
+                    StepInfo::BrTable {
+                        index,
+                        offset: targets.to_usize(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::CallInternal(compiled_func) => {
+                let len = self.code_map.header(compiled_func).len_locals();
+                let mut args = Vec::new();
+                for i in 1..len {
+                    args.push(self.sp.nth_back(i));
+                }
+
+                StepInfo::CallInternal { args }
+            }
+
+            Instruction::Return(_) => {
+                if let RunInstructionTracePre::Return { drop, keep_values } = pre_status.unwrap() {
+                    StepInfo::Return { drop, keep_values }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::Drop => StepInfo::Drop,
+            Instruction::Select => {
+                if let RunInstructionTracePre::Select { val1, val2, cond } = pre_status.unwrap() {
+                    StepInfo::Select {
+                        val1,
+                        val2,
+                        cond,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32Load(..)
+            | Instruction::I32Load8U(..)
+            | Instruction::I32Load8S(..)
+            | Instruction::I32Load16U(..)
+            | Instruction::I32Load16S(..)
+            | Instruction::I64Load(..)
+            | Instruction::I64Load8U(..)
+            | Instruction::I64Load8S(..)
+            | Instruction::I64Load16U(..)
+            | Instruction::I64Load16S(..)
+            | Instruction::I64Load32U(..)
+            | Instruction::I64Load32S(..) => {
+                if let RunInstructionTracePre::Load {
+                    offset,
+                    raw_address,
+                    effective_address,
+                    vtype,
+                    load_size,
+                } = pre_status.unwrap()
+                {
+                    let block_value1 = {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read(effective_address.unwrap() / 8 * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    };
+
+                    let block_value2 = if effective_address.unwrap() % 8 + load_size.byte_size() > 8
+                    {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read((effective_address.unwrap() / 8 + 1) * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    } else {
+                        0
+                    };
+
+                    StepInfo::Load {
+                        vtype: vtype.into(),
+                        load_size,
+                        offset,
+                        raw_address,
+                        effective_address: effective_address.unwrap(),
+                        value: self.sp.last().to_bits(),
+                        block_value1,
+                        block_value2,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32Load(..) | Instruction::F64Load(..) => {
+                if let RunInstructionTracePre::Load {
+                    offset,
+                    raw_address,
+                    effective_address,
+                    vtype,
+                    load_size,
+                } = pre_status.unwrap()
+                {
+                    let block_value1 = {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read(effective_address.unwrap() / 8 * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    };
+
+                    let block_value2 = if effective_address.unwrap() % 8 + load_size.byte_size() > 8
+                    {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read((effective_address.unwrap() / 8 + 1) * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    } else {
+                        0
+                    };
+
+                    StepInfo::Load {
+                        vtype: vtype.into(),
+                        load_size,
+                        offset,
+                        raw_address,
+                        effective_address: effective_address.unwrap(),
+                        value: self.sp.last().to_bits(),
+                        block_value1,
+                        block_value2,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32Store(..)
+            | Instruction::I32Store8(..)
+            | Instruction::I32Store16(..)
+            | Instruction::I64Store(..)
+            | Instruction::I64Store8(..)
+            | Instruction::I64Store16(..)
+            | Instruction::I64Store32(..) => {
+                if let RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address,
+                    value,
+                    vtype,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                } = pre_status.unwrap()
+                {
+                    let updated_block_value1 = {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read(effective_address.unwrap() / 8 * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    };
+
+                    let updated_block_value2 =
+                        if effective_address.unwrap() % 8 + store_size.byte_size() > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref
+                                .read((effective_address.unwrap() / 8 + 1) * 8, &mut buf)
+                                .unwrap();
+                            u64::from_le_bytes(buf)
+                        } else {
+                            0
+                        };
+
+                    StepInfo::Store {
+                        vtype: vtype.into(),
+                        store_size,
+                        offset,
+                        raw_address,
+                        effective_address: effective_address.unwrap(),
+                        value: value as u64,
+                        pre_block_value1: pre_block_value1.unwrap(),
+                        pre_block_value2: pre_block_value2.unwrap_or(0u64),
+                        updated_block_value1,
+                        updated_block_value2,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32Store(..) | Instruction::F64Store(..) => {
+                if let RunInstructionTracePre::Store {
+                    offset,
+                    raw_address,
+                    effective_address,
+                    value,
+                    vtype,
+                    store_size,
+                    pre_block_value1,
+                    pre_block_value2,
+                } = pre_status.unwrap()
+                {
+                    let updated_block_value1 = {
+                        let mut buf = [0u8; 8];
+                        let memory = self.cache.default_memory(self.ctx);
+                        let memref = self.ctx.resolve_memory(&memory);
+                        memref
+                            .read(effective_address.unwrap() / 8 * 8, &mut buf)
+                            .unwrap();
+                        u64::from_le_bytes(buf)
+                    };
+
+                    let updated_block_value2 =
+                        if effective_address.unwrap() % 8 + store_size.byte_size() > 8 {
+                            let mut buf = [0u8; 8];
+                            let memory = self.cache.default_memory(self.ctx);
+                            let memref = self.ctx.resolve_memory(&memory);
+                            memref
+                                .read((effective_address.unwrap() / 8 + 1) * 8, &mut buf)
+                                .unwrap();
+                            u64::from_le_bytes(buf)
+                        } else {
+                            0
+                        };
+
+                    StepInfo::Store {
+                        vtype: vtype.into(),
+                        store_size,
+                        offset,
+                        raw_address,
+                        effective_address: effective_address.unwrap(),
+                        value,
+                        pre_block_value1: pre_block_value1.unwrap(),
+                        pre_block_value2: pre_block_value2.unwrap_or(0u64),
+                        updated_block_value1,
+                        updated_block_value2,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::MemorySize => StepInfo::MemorySize,
+            Instruction::MemoryGrow => {
+                if let RunInstructionTracePre::GrowMemory(grow_size) = pre_status.unwrap() {
+                    StepInfo::MemoryGrow {
+                        grow_size,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::ConstRef(const_ref) => StepInfo::ConstRef {
+                value: self.const_pool.get(const_ref).unwrap_or_default().into(),
+            },
+            Instruction::Const32(value) => StepInfo::Const32 {
+                value: u32::from_ne_bytes(value),
+            },
+            Instruction::I64Const32(value) => StepInfo::I64Const {
+                value: value as i64,
+            },
+            Instruction::F64Const32(value) => StepInfo::F64Const {
+                value: value.to_f64(),
+            },
+
+            Instruction::I32Eqz => {
+                if let RunInstructionTracePre::I32Single(value) = pre_status.unwrap() {
+                    StepInfo::CompZ {
+                        vtype: VarType::I32,
+                        value: value as u32 as u64,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I64Eqz => {
+                if let RunInstructionTracePre::I64Single(value) = pre_status.unwrap() {
+                    StepInfo::CompZ {
+                        vtype: VarType::I64,
+                        value: value as u64,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32Eq => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::Eq,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Ne => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::Ne,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32LtS => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::SignedLt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32LtU => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::UnsignedLt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32GtS => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::SignedGt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32GtU => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::UnsignedGt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32LeS => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::SignedLe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32LeU => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::UnsignedLe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32GeS => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::SignedGe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32GeU => {
+                if let RunInstructionTracePre::I32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32Comp {
+                        class: RelOp::UnsignedGe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I64Eq => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::Eq,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Ne => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::Ne,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64LtS => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::SignedLt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64LtU => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::UnsignedLt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64GtS => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::SignedGt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64GtU => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::UnsignedGt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64LeS => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::SignedLe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64LeU => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::UnsignedLe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64GeS => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::SignedGe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64GeU => {
+                if let RunInstructionTracePre::I64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64Comp {
+                        class: RelOp::UnsignedGe,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32Eq => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Eq,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Ne => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Ne,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Lt => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Lt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Gt => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Gt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Le => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Le,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Ge => {
+                if let RunInstructionTracePre::F32Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32Comp {
+                        class: RelOp::Ge,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64Eq => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Eq,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Ne => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Ne,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Lt => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Lt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Gt => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Gt,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Le => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Le,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Ge => {
+                if let RunInstructionTracePre::F64Comp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64Comp {
+                        class: RelOp::Ge,
+                        left,
+                        right,
+                        value: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
             Instruction::I32Add => {
                 if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
@@ -288,6 +1661,1049 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Sub => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Mul => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32DivS => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32DivU => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32RemS => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32RemU => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32And => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinBitOp {
+                        class: BitOp::And,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Or => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinBitOp {
+                        class: BitOp::Or,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Xor => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinBitOp {
+                        class: BitOp::Xor,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Shl => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::Shl,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32ShrS => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::SignedShr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32ShrU => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::UnsignedShr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Rotl => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::Rotl,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Rotr => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::Rotr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i32,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I64Add => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Sub => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Mul => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64DivS => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64DivU => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64RemS => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64RemU => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64And => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinBitOp {
+                        class: BitOp::And,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Or => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinBitOp {
+                        class: BitOp::Or,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Xor => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinBitOp {
+                        class: BitOp::Xor,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Shl => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinShiftOp {
+                        class: ShiftOp::Shl,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64ShrS => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinShiftOp {
+                        class: ShiftOp::SignedShr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64ShrU => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinShiftOp {
+                        class: ShiftOp::UnsignedShr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Rotl => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinShiftOp {
+                        class: ShiftOp::Rotl,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Rotr => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinShiftOp {
+                        class: ShiftOp::Rotr,
+                        left,
+                        right,
+                        value: self.sp.last().to_bits() as i64,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32Abs => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Abs,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Neg => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Neg,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Ceil => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Ceil,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Floor => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Floor,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Trunc => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Trunc,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Nearest => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Nearest,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Sqrt => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Sqrt,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64Abs => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Abs,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Neg => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Neg,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Ceil => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Ceil,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Floor => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Floor,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Trunc => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Trunc,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Nearest => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Nearest,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Sqrt => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Sqrt,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32Add => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Sub => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Sub,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Mul => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Mul,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Div => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Div,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Min => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Min,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Max => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Max,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32Copysign => {
+                if let RunInstructionTracePre::F32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F32BinOp {
+                        class: BinOp::Copysign,
+                        left,
+                        right,
+                        value: f32::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64Add => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Add,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Sub => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Sub,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Mul => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Mul,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Div => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Div,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Min => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Min,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Max => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Max,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64Copysign => {
+                if let RunInstructionTracePre::F64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::F64BinOp {
+                        class: BinOp::Copysign,
+                        left,
+                        right,
+                        value: f64::from(self.sp.last()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32Ctz | Instruction::I64Ctz => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Ctz,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Clz | Instruction::I64Clz => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Clz,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Popcnt | Instruction::I64Popcnt => {
+                if let RunInstructionTracePre::UnaryOp { operand, vtype } = pre_status.unwrap() {
+                    StepInfo::UnaryOp {
+                        class: UnaryOp::Popcnt,
+                        vtype,
+                        operand,
+                        result: self.sp.last().to_bits(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32WrapI64 => {
+                if let RunInstructionTracePre::I32WrapI64 { value } = pre_status.unwrap() {
+                    StepInfo::I32WrapI64 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32TruncF32S => {
+                if let RunInstructionTracePre::I32TruncF32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I32TruncF32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32TruncF32U => {
+                if let RunInstructionTracePre::I32TruncF32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I32TruncF32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32TruncF64S => {
+                if let RunInstructionTracePre::I32TruncF64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I32TruncF64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I32TruncF64U => {
+                if let RunInstructionTracePre::I32TruncF64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I32TruncF64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64TruncF32S => {
+                if let RunInstructionTracePre::I64TruncF32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I64TruncF32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I64TruncF32U => {
+                if let RunInstructionTracePre::I64TruncF32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I64TruncF32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64TruncF64S => {
+                if let RunInstructionTracePre::I64TruncF64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I64TruncF64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::I64TruncF64U => {
+                if let RunInstructionTracePre::I64TruncF64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I64TruncF64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32ConvertI32S => {
+                if let RunInstructionTracePre::F32ConvertI32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F32ConvertI32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32ConvertI32U => {
+                if let RunInstructionTracePre::F32ConvertI32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F32ConvertI32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32ConvertI64S => {
+                if let RunInstructionTracePre::F32ConvertI64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F32ConvertI64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F32ConvertI64U => {
+                if let RunInstructionTracePre::F32ConvertI64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F32ConvertI64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F32DemoteF64 => {
+                if let RunInstructionTracePre::F32DemoteF64 { value } = pre_status.unwrap() {
+                    StepInfo::F32DemoteF64 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64ConvertI32S => {
+                if let RunInstructionTracePre::F64ConvertI32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F64ConvertI32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64ConvertI32U => {
+                if let RunInstructionTracePre::F64ConvertI32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F64ConvertI32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64ConvertI64S => {
+                if let RunInstructionTracePre::F64ConvertI64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F64ConvertI64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            Instruction::F64ConvertI64U => {
+                if let RunInstructionTracePre::F64ConvertI64 { value, sign } = pre_status.unwrap() {
+                    StepInfo::F64ConvertI64 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::F64PromoteF32 => {
+                if let RunInstructionTracePre::F64PromoteF32 { value } = pre_status.unwrap() {
+                    StepInfo::F64PromoteF32 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            // Instruction::I32ReinterpretF32 => {
+            //     if let RunInstructionTracePre::I32ReinterpretF32 { value } = pre_status.unwrap() {
+            //         StepInfo::I32ReinterpretF32 {
+            //             value,
+            //             result: self.sp.last().into(),
+            //         }
+            //     } else {
+            //         unreachable!()
+            //     }
+            // }
+            // Instruction::I64ReinterpretF64 => {
+            //     if let RunInstructionTracePre::I64ReinterpretF64 { value } = pre_status.unwrap() {
+            //         StepInfo::I64ReinterpretF64 {
+            //             value,
+            //             result: self.sp.last().into(),
+            //         }
+            //     } else {
+            //         unreachable!()
+            //     }
+            // }
+            // Instruction::F32ReinterpretI32 => {
+            //     if let RunInstructionTracePre::F32ReinterpretI32 { value } = pre_status.unwrap() {
+            //         StepInfo::F32ReinterpretI32 {
+            //             value,
+            //             result: self.sp.last().into(),
+            //         }
+            //     } else {
+            //         unreachable!()
+            //     }
+            // }
+            // Instruction::F64ReinterpretI64 => {
+            //     if let RunInstructionTracePre::F64ReinterpretI64 { value } = pre_status.unwrap() {
+            //         StepInfo::F64ReinterpretI64 {
+            //             value,
+            //             result: self.sp.last().into(),
+            //         }
+            //     } else {
+            //         unreachable!()
+            //     }
+            // }
+            Instruction::I64ExtendI32S | Instruction::I64ExtendI32U => {
+                if let RunInstructionTracePre::I64ExtendI32 { value, sign } = pre_status.unwrap() {
+                    StepInfo::I64ExtendI32 {
+                        value,
+                        result: self.sp.last().into(),
+                        sign,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Extend8S => {
+                if let RunInstructionTracePre::I32SignExtendI8 { value } = pre_status.unwrap() {
+                    StepInfo::I32SignExtendI8 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I32Extend16S => {
+                if let RunInstructionTracePre::I32SignExtendI16 { value } = pre_status.unwrap() {
+                    StepInfo::I32SignExtendI16 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Extend8S => {
+                if let RunInstructionTracePre::I64SignExtendI8 { value } = pre_status.unwrap() {
+                    StepInfo::I64SignExtendI8 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Extend16S => {
+                if let RunInstructionTracePre::I64SignExtendI16 { value } = pre_status.unwrap() {
+                    StepInfo::I64SignExtendI16 {
+                        value,
+                        result: self.sp.last().into(),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            Instruction::I64Extend32S => {
+                if let RunInstructionTracePre::I64SignExtendI32 { value } = pre_status.unwrap() {
+                    StepInfo::I64SignExtendI32 {
+                        value,
+                        result: self.sp.last().into(),
                     }
                 } else {
                     unreachable!()
@@ -303,15 +2719,14 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
     /// Executes the function frame until it returns or traps.
     #[inline(always)]
     fn execute(
-        mut self,
+        &mut self,
         resource_limiter: &'ctx mut ResourceLimiterRef<'ctx>,
     ) -> Result<WasmOutcome, TrapCode> {
         use Instruction as Instr;
         loop {
-            let instruction = self.ip.get();
+            let instruction = unsafe { &*self.ip.ptr };
             let instruction_copy = instruction.clone();
             let pre_status = self.execute_instruction_pre(&instruction);
-
             macro_rules! trace_post {
                 () => {{
                     if self.tracer.is_some() {
@@ -321,7 +2736,6 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                                 self.execute_instruction_post(pre_status, &instruction_copy);
                             tracer.etable.push(post_status);
                         }
-                        // println!("{:?}, {:?}", instruction_copy, self.sp.last());
                     }
                 }};
             }
@@ -340,6 +2754,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 Instr::ConsumeFuel(block_fuel) => self.visit_consume_fuel(block_fuel)?,
                 Instr::Return(drop_keep) => {
                     if let ReturnOutcome::Host = self.visit_ret(drop_keep) {
+                        trace_post!();
                         return Ok(WasmOutcome::Return);
                     }
                 }

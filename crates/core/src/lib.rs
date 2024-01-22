@@ -40,6 +40,12 @@ pub use self::{
     nan_preserving_float::{F32, F64},
     trap::{Trap, TrapCode},
     units::Pages,
-    untyped::{DecodeUntypedSlice, EncodeUntypedSlice, UntypedError, UntypedValue},
+    untyped::{
+        effective_address,
+        DecodeUntypedSlice,
+        EncodeUntypedSlice,
+        UntypedError,
+        UntypedValue,
+    },
     value::ValueType,
 };

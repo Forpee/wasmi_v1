@@ -1,5 +1,5 @@
 pub mod etable;
-mod imtable;
+pub mod imtable;
 use wasmi_core::UntypedValue;
 
 use crate::{AsContext, Global, Memory};

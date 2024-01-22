@@ -21,20 +21,9 @@ pub fn main() -> Result<()> {
     let engine = Engine::default();
     let tracer = Tracer::new();
     let tracer = Rc::new(RefCell::new(tracer));
-    // let wat = r#"
-    //     (module
-    //         (func (export "main") (result i32)
-    //             i32.const 100
-    //             i32.const 20
-    //             i32.add
-    //             i32.const 100
-    //             i32.add
-    //         )
-    //     )
-    // "#;
+
     // Wasmi does not yet support parsing `.wat` so we have to convert
     // out `.wat` into `.wasm` before we compile and validate it.
-    // let wasm = wat::parse_str(&wat)?;
 
     let wasm = load_from_file("crates/wasmi/tests/wasms/test_rust.wasm");
     let module = Module::new(&engine, &mut &wasm[..])?;
@@ -42,7 +31,7 @@ pub fn main() -> Result<()> {
     // // Each `Store` has a type parameter to store host-specific data,
     // // which in this case we are using `42` for.
     type HostState = u32;
-    let mut store = Store::new(&engine, 1);
+    let mut store = Store::new(&engine, 0);
     let host_hello = Func::wrap(&mut store, |caller: Caller<'_, HostState>, param: i32| {
         println!("Got {param} from WebAssembly");
         println!("My host state is: {}", caller.data());
@@ -58,15 +47,14 @@ pub fn main() -> Result<()> {
     // // // //
     // // // // Also before using an instance created this way we need to start it.
     linker.define("host", "main", host_hello)?;
-    let instance = linker
-        .instantiate_with_tracer(&mut store, &module, tracer.clone())?
-        .start(&mut store)?;
+    let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
     let hello = instance.get_func(&store, "main").unwrap();
     // // // // And finally we can call the wasm!
     let mut ty = prepare_func_results(&hello.ty(&store));
-    hello.call(&mut store, &[], &mut ty)?;
+    // hello.call(&mut store, &[], &mut ty)?;
+    hello.call_with_trace(&mut store, &[], &mut ty, tracer.clone())?;
 
-    println!("{:?}", (*tracer).borrow().imtable);
+    println!("{:?}", (*tracer).borrow().etable);
 
     Ok(())
 }

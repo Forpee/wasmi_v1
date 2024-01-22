@@ -130,7 +130,7 @@ macro_rules! op {
 /// # Errors
 ///
 /// If the resulting effective address overflows.
-fn effective_address(address: u32, offset: u32) -> Result<usize, TrapCode> {
+pub fn effective_address(address: u32, offset: u32) -> Result<usize, TrapCode> {
     offset
         .checked_add(address)
         .map(|address| address as usize)

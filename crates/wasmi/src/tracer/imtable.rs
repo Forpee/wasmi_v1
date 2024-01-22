@@ -7,6 +7,54 @@ pub enum LocationType {
     Global = 3,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+pub enum MemoryReadSize {
+    U8 = 1,
+    S8,
+    U16,
+    S16,
+    U32,
+    S32,
+    I64,
+    F32,
+    F64,
+}
+
+impl MemoryReadSize {
+    pub fn byte_size(&self) -> usize {
+        match self {
+            MemoryReadSize::U8 => 1,
+            MemoryReadSize::S8 => 1,
+            MemoryReadSize::U16 => 2,
+            MemoryReadSize::S16 => 2,
+            MemoryReadSize::U32 => 4,
+            MemoryReadSize::S32 => 4,
+            MemoryReadSize::I64 => 8,
+            MemoryReadSize::F32 => 4,
+            MemoryReadSize::F64 => 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+pub enum MemoryStoreSize {
+    Byte8 = 1,
+    Byte16,
+    Byte32,
+    Byte64,
+}
+
+impl MemoryStoreSize {
+    pub fn byte_size(&self) -> usize {
+        match self {
+            MemoryStoreSize::Byte8 => 1,
+            MemoryStoreSize::Byte16 => 2,
+            MemoryStoreSize::Byte32 => 4,
+            MemoryStoreSize::Byte64 => 8,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VarType {
     I64 = 0,
