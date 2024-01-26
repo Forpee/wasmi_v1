@@ -29,7 +29,7 @@ jobs:
         run: bash scripts/ci/sync_wait.sh
 
       - name: Store benchmark result criterion
-        uses: benchmark-action/github-action-benchmark@70405016b032d44f409e4b1b451c40215cbe2393 # v1.18.0
+        uses: benchmark-action/github-action-benchmark@43d26a5d4cf455feb00c366b6c6a0a3e01813139 # v1.19.1
         with:
           name: "Wasmi criterion benchmark"
           tool: "cargo"
@@ -39,7 +39,7 @@ jobs:
           skip-fetch-gh-pages: true
 
       - name: Store benchmark result wasmtime
-        uses: benchmark-action/github-action-benchmark@70405016b032d44f409e4b1b451c40215cbe2393 # v1.18.0
+        uses: benchmark-action/github-action-benchmark@43d26a5d4cf455feb00c366b6c6a0a3e01813139 # v1.19.1
         with:
           name: "Wasmi criterion wasmtime"
           tool: "cargo"
