@@ -29,9 +29,7 @@ pub enum RunInstructionTracePre {
         args: Vec<UntypedValue>,
     },
     CallIndirect {
-        table_idx: u32,
-        type_idx: u32,
-        offset: u32,
+        idx: u32,
     },
     SetLocal {
         depth: usize,
@@ -325,6 +323,9 @@ pub enum StepInfo {
         condition: i32,
         offset: i32,
     },
+    BrAdjust {
+        offset: i32,
+    },
     BrTable {
         index: i32,
         offset: usize,
@@ -344,9 +345,6 @@ pub enum StepInfo {
         args: Vec<UntypedValue>,
     },
     CallIndirect {
-        table_index: u32,
-        type_index: u32,
-        offset: u32,
         func_index: u32,
     },
     // CallHost {

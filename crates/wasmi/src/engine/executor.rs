@@ -330,6 +330,9 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             }
 
             Instruction::CallInternal(_) => None,
+            Instruction::CallIndirect(idx) => Some(RunInstructionTracePre::CallIndirect {
+                idx: idx.to_u32(),
+            }),
 
             Instruction::Drop => None,
             Instruction::Select => Some(RunInstructionTracePre::Select {
@@ -620,13 +623,9 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64Const32(_) => None,
             Instruction::F64Const32(_) => None,
 
-            Instruction::I32Eqz => Some(RunInstructionTracePre::I32Single(
-                self.sp.last().into(),
-            )),
+            Instruction::I32Eqz => Some(RunInstructionTracePre::I32Single(self.sp.last().into())),
 
-            Instruction::I64Eqz => Some(RunInstructionTracePre::I64Single(
-                self.sp.last().into(),
-            )),
+            Instruction::I64Eqz => Some(RunInstructionTracePre::I64Single(self.sp.last().into())),
 
             Instruction::I32Eq
             | Instruction::I32Ne
@@ -962,6 +961,9 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                     unreachable!()
                 }
             }
+            Instruction::BrAdjust(offset) => StepInfo::BrAdjust {
+                offset: offset.to_i32(),
+            },
             Instruction::BrTable(targets) => {
                 if let RunInstructionTracePre::BrTable { index } = pre_status.unwrap() {
                     StepInfo::BrTable {
@@ -981,7 +983,15 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
 
                 StepInfo::CallInternal { args }
             }
-
+            Instruction::CallIndirect(idx) => {
+                if let RunInstructionTracePre::CallIndirect { idx } = pre_status.unwrap() {
+                    StepInfo::CallIndirect {
+                        func_index: idx,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
             Instruction::Return(_) => {
                 if let RunInstructionTracePre::Return { drop, keep_values } = pre_status.unwrap() {
                     StepInfo::Return { drop, keep_values }
