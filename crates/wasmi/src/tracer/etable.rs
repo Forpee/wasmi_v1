@@ -1,6 +1,6 @@
 use wasmi_core::UntypedValue;
 
-use super::imtable::{MemoryReadSize, MemoryStoreSize};
+use super::imtable::{MemoryReadSize, MemoryStoreSize, VarType};
 
 pub fn from_untyped_value_to_u64_with_typ(vtype: VarType, val: UntypedValue) -> u64 {
     match vtype {
@@ -8,6 +8,7 @@ pub fn from_untyped_value_to_u64_with_typ(vtype: VarType, val: UntypedValue) -> 
         VarType::I64 => val.to_bits(),
         VarType::F32 => val.to_bits(),
         VarType::F64 => val.to_bits(),
+        _=> panic!("Unsupported type"),
     }
 }
 
@@ -267,13 +268,6 @@ pub enum RelOp {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TestOp {
     Eqz,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum VarType {
-    I64 = 0,
-    I32 = 1,
-    F32 = 2,
-    F64 = 3,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

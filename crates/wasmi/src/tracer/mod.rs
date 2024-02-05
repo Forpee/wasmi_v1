@@ -1,5 +1,6 @@
 pub mod etable;
 pub mod imtable;
+pub mod mtable;
 use wasmi_core::UntypedValue;
 
 use crate::{AsContext, Global, Memory};
@@ -7,6 +8,7 @@ use crate::{AsContext, Global, Memory};
 use self::{
     etable::ETable,
     imtable::{IMTable, VarType},
+    mtable::{memory_event_of_step, MTable},
 };
 
 #[derive(Debug)]
@@ -64,5 +66,17 @@ impl Tracer {
             vtype_content.into(),
             val.to_bits(),
         );
+    }
+
+    pub fn get_mtable(&self) -> MTable {
+        let mentries = self
+            .etable
+            .entries()
+            .iter()
+            .map(|eentry| memory_event_of_step(eentry, &mut 1))
+            .collect::<Vec<Vec<_>>>()
+            .concat();
+
+        MTable::new(mentries, &self.imtable)
     }
 }

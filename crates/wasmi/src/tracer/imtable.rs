@@ -1,11 +1,6 @@
 use wasmi_core::ValueType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum LocationType {
-    Stack = 1,
-    Heap = 2,
-    Global = 3,
-}
+use super::mtable::LocationType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub enum MemoryReadSize {
@@ -114,5 +109,41 @@ impl IMTable {
             vtype,
             value,
         })
+    }
+
+    pub fn try_find(&self, ltype: LocationType, offset: u32) -> Option<(u32, u32, u64)> {
+        Some((0, 0, 0))
+        // match ltype {
+        //     LocationType::Heap => {
+        //         let idx = self
+        //             .sorted_heap_init_entries
+        //             .binary_search_by(|entry| {
+        //                 if offset >= entry.start_offset && offset <= entry.end_offset {
+        //                     Ordering::Equal
+        //                 } else if offset < entry.start_offset {
+        //                     Ordering::Greater
+        //                 } else {
+        //                     Ordering::Less
+        //                 }
+        //             })
+        //             .unwrap();
+
+        //         return Some((
+        //             self.sorted_heap_init_entries[idx].start_offset,
+        //             self.sorted_heap_init_entries[idx].end_offset,
+        //             self.sorted_heap_init_entries[idx].value,
+        //         ));
+        //     }
+        //     LocationType::Global => {
+        //         for entry in self.sorted_global_init_entries.iter() {
+        //             if entry.start_offset == offset {
+        //                 return Some((offset, offset, entry.value));
+        //             }
+        //         }
+        //     }
+        //     LocationType::Stack => unreachable!(),
+        // }
+
+        // None
     }
 }

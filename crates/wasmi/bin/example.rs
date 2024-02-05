@@ -25,7 +25,7 @@ pub fn main() -> Result<()> {
     // Wasmi does not yet support parsing `.wat` so we have to convert
     // out `.wat` into `.wasm` before we compile and validate it.
 
-    let wasm = load_from_file("crates/wasmi/tests/wasms/test_rust_1.wasm");
+    let wasm = load_from_file("crates/wasmi/tests/wasms/test_rust.wasm");
     let module = Module::new(&engine, &mut &wasm[..])?;
     // All Wasm objects operate within the context of a `Store`.
     // Each `Store` has a type parameter to store host-specific data,
@@ -54,7 +54,9 @@ pub fn main() -> Result<()> {
     // And finally we can call the wasm!
     hello.call_with_trace(&mut store, &[], &mut ty, tracer.clone())?;
 
-    println!("{:?}", (*tracer).borrow().etable);
+    // println!("{:?}", (*tracer).borrow().etable);
+    let mtable = (*tracer).borrow().get_mtable();
+    println!("{:?}", mtable);
 
     Ok(())
 }

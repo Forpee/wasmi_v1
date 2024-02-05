@@ -38,12 +38,11 @@ use crate::{
         ShiftOp,
         StepInfo,
         UnaryOp,
-        VarType,
     },
     func::FuncEntity,
     store::ResourceLimiterRef,
     table::TableEntity,
-    tracer::imtable::{MemoryReadSize, MemoryStoreSize},
+    tracer::imtable::{MemoryReadSize, MemoryStoreSize, VarType},
     FuelConsumptionMode,
     Func,
     FuncRef,
@@ -904,9 +903,12 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
         instruction: &Instruction,
     ) -> StepInfo {
         match *instruction {
-            Instruction::LocalGet(local_depth) => StepInfo::LocalGet {
-                depth: local_depth.to_usize(),
-                value: self.sp.last().to_bits(),
+            Instruction::LocalGet(local_depth) => {
+                let value = self.sp.last();
+                StepInfo::LocalGet {
+                    depth: local_depth.to_usize(),
+                    value: self.sp.last().to_bits(),
+                }
             },
             Instruction::LocalSet(..) => {
                 if let RunInstructionTracePre::SetLocal { depth, value } = pre_status.unwrap() {
