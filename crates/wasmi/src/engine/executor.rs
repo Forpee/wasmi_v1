@@ -40,6 +40,7 @@ use crate::{
         UnaryOp,
     },
     func::FuncEntity,
+    module::DEFAULT_MEMORY_INDEX,
     store::ResourceLimiterRef,
     table::TableEntity,
     tracer::imtable::{MemoryReadSize, MemoryStoreSize, VarType},
@@ -2739,9 +2740,23 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             let instruction = unsafe { &*self.ip.ptr };
             let instruction_copy = instruction.clone();
             let pre_status = self.execute_instruction_pre(&instruction);
-            let memory = self.cache.default_memory(self.ctx);
-            let memref = self.ctx.resolve_memory(&memory);
-            let pages = memref.current_pages().to_bytes();
+
+            let has_default_memory = {
+                let instance = self.cache.instance();
+                self.ctx
+                    .resolve_instance(instance)
+                    .get_memory(DEFAULT_MEMORY_INDEX)
+                    .is_some()
+            };
+
+            let pages = if has_default_memory {
+                self.ctx
+                    .resolve_memory(self.cache.default_memory(self.ctx))
+                    .current_pages()
+                    .into()
+            } else {
+                0
+            };
 
             macro_rules! trace_post {
                 () => {{

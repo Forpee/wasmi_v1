@@ -42,3 +42,7 @@ harness = false
 [[bin]]
 path = "bin/example.rs"
 name = "test_v1"
+
+[[bin]]
+path = "bin/run_wat.rs"
+name = "run_wat"

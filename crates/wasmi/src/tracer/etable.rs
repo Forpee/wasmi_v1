@@ -629,11 +629,10 @@ impl ETable {
     pub fn entries_mut(&mut self) -> &mut Vec<ETEntry> {
         &mut self.0
     }
-    pub fn push(&mut self, allocated_memory_pages: Option<usize>, step_info: StepInfo) {
-        let allocated_memory_pages = allocated_memory_pages.unwrap_or(0);
+    pub fn push(&mut self, allocated_memory_pages: u32, step_info: StepInfo) {
         let et_entry = ETEntry {
             eid: (self.entries().len() + 1).try_into().unwrap(),
-            allocated_memory_pages,
+            allocated_memory_pages: allocated_memory_pages as usize,
             step_info,
         };
 
