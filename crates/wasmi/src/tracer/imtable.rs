@@ -111,7 +111,7 @@ impl IMTable {
         })
     }
 
-    pub fn try_find(&self, ltype: LocationType, offset: u32) -> Option<(u32, u32, u64)> {
+    pub fn try_find(&self) -> Option<(u32, u32, u64)> {
         Some((0, 0, 0))
         // match ltype {
         //     LocationType::Heap => {

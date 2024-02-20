@@ -19,10 +19,13 @@ pub fn main() -> Result<()> {
 
     let wat = r#"
     (module
-      (func (export "main") (result i32)
+      (func (export "main")
           i32.const 100
           i32.const 200
           i32.add
+          i32.const 500
+          i32.add
+          drop
       )
     )
     "#;
@@ -58,9 +61,20 @@ pub fn main() -> Result<()> {
     // And finally we can call the wasm!
     hello.call_with_trace(&mut store, &[], &mut ty, tracer.clone())?;
 
-    println!("{:?}", (*tracer).borrow().etable);
     let mtable = (*tracer).borrow().get_mtable();
-    // println!("{:?}", mtable);
+    let etable = &tracer.borrow().etable;
+    println!("");
+    for entry in etable.entries() {
+        println!("{:?}", entry);
+    }
+    println!("");
+    println!("--------------------");
+    println!("");
+
+    for entry in mtable.entries() {
+        println!("{:?}", entry);
+    }
+    println!("");
 
     Ok(())
 }

@@ -28,7 +28,7 @@ pub struct MemoryTableEntry {
        So we need emid to seq the r/w op, which is an incremental value starting from 1.
     */
     pub emid: u32,
-    pub offset: u32,
+    pub addr: usize,
     pub ltype: LocationType,
     pub atype: AccessType,
     pub is_mutable: bool,
@@ -47,15 +47,14 @@ impl MTable {
 
     fn push_accessed_memory_initialization(&mut self, imtable: &IMTable) {
         let mut set = HashSet::<MemoryTableEntry>::default();
-
         self.0.iter().for_each(|entry| {
             if entry.ltype == LocationType::Heap || entry.ltype == LocationType::Global {
-                let (_, _, value) = imtable.try_find(entry.ltype, entry.offset).unwrap();
+                let (_, _, value) = imtable.try_find().unwrap();
 
                 set.insert(MemoryTableEntry {
                     eid: 0,
                     emid: 0,
-                    offset: entry.offset,
+                    addr: entry.addr,
                     ltype: entry.ltype,
                     atype: AccessType::Init,
                     is_mutable: entry.is_mutable,
@@ -74,238 +73,237 @@ impl MTable {
     }
 }
 
-fn mem_op_from_stack_only_step(
-    sp_before_execution: u32,
-    eid: u32,
-    emid: &mut u32,
-    pop_value: &[u64],
-    push_value: &[u64],
-) -> Vec<MemoryTableEntry> {
-    let mut mem_op = vec![];
-    let mut sp = sp_before_execution;
+// fn mem_op_from_stack_only_step(
+//     sp_before_execution: u32,
+//     eid: u32,
+//     emid: &mut u32,
+//     pop_value: &[u64],
+//     push_value: &[u64],
+// ) -> Vec<MemoryTableEntry> {
+//     let mut mem_op = vec![];
+//     let mut sp = sp_before_execution;
 
-    for i in 0..pop_value.len() {
-        mem_op.push(MemoryTableEntry {
-            eid,
-            emid: *emid,
-            offset: sp + 1,
-            ltype: LocationType::Stack,
-            atype: AccessType::Read,
-            is_mutable: true,
-            value: pop_value[i],
-        });
-        *emid = (*emid).checked_add(1).unwrap();
-        sp = sp + 1;
-    }
+//     for i in 0..pop_value.len() {
+//         mem_op.push(MemoryTableEntry {
+//             eid,
+//             emid: *emid,
+//             offset: sp + 1,
+//             ltype: LocationType::Stack,
+//             atype: AccessType::Read,
+//             is_mutable: true,
+//             value: pop_value[i],
+//         });
+//         *emid = (*emid).checked_add(1).unwrap();
+//         sp = sp + 1;
+//     }
 
-    for i in 0..push_value.len() {
-        mem_op.push(MemoryTableEntry {
-            eid,
-            emid: *emid,
-            offset: sp,
-            ltype: LocationType::Stack,
-            atype: AccessType::Write,
-            is_mutable: true,
-            value: push_value[i],
-        });
-        sp = sp - 1;
-        *emid = (*emid).checked_add(1).unwrap();
-    }
+//     for i in 0..push_value.len() {
+//         mem_op.push(MemoryTableEntry {
+//             eid,
+//             emid: *emid,
+//             offset: sp,
+//             ltype: LocationType::Stack,
+//             atype: AccessType::Write,
+//             is_mutable: true,
+//             value: push_value[i],
+//         });
+//         sp = sp - 1;
+//         *emid = (*emid).checked_add(1).unwrap();
+//     }
 
-    mem_op
-}
+//     mem_op
+// }
 
 pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableEntry> {
     let eid = event.eid;
-    // let sp_before_execution = event.sp;
-    let sp_before_execution: u32 = 1;
 
     match &event.step_info {
-        StepInfo::Br { offset, .. } => {
-            let mut sp = sp_before_execution + 1;
-            let mut ops = vec![];
+        // StepInfo::Br { offset, .. } => {
+        //     let mut sp = sp_before_execution + 1;
+        //     let mut ops = vec![];
 
-            ops
-        }
-        StepInfo::BrIfEqz {
-            condition, offset, ..
-        } => {
-            let mut sp = sp_before_execution + 1;
+        //     ops
+        // }
+        // StepInfo::BrIfEqz {
+        //     condition, offset, ..
+        // } => {
+        //     let mut sp = sp_before_execution + 1;
 
-            let mut ops = vec![MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *condition as u32 as u64,
-            }];
+        //     let mut ops = vec![MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *condition as u32 as u64,
+        //     }];
 
-            sp = sp + 1;
-            *emid = (*emid).checked_add(1).unwrap();
+        //     sp = sp + 1;
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            if *condition != 0 {
-                return ops;
-            }
+        //     if *condition != 0 {
+        //         return ops;
+        //     }
 
-            ops
-        }
-        StepInfo::BrIfNez {
-            condition, offset, ..
-        } => {
-            let mut sp = sp_before_execution + 1;
+        //     ops
+        // }
+        // StepInfo::BrIfNez {
+        //     condition, offset, ..
+        // } => {
+        //     let mut sp = sp_before_execution + 1;
 
-            let mut ops = vec![MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *condition as u32 as u64,
-            }];
+        //     let mut ops = vec![MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *condition as u32 as u64,
+        //     }];
 
-            ops
-        }
-        StepInfo::BrTable { index, offset, .. } => {
-            let mut sp = sp_before_execution + 1;
+        //     ops
+        // }
+        // StepInfo::BrTable { index, offset, .. } => {
+        //     let mut sp = sp_before_execution + 1;
 
-            let ops = vec![MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *index as u32 as u64,
-            }];
+        //     let ops = vec![MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *index as u32 as u64,
+        //     }];
 
-            sp = sp + 1;
-            *emid = (*emid).checked_add(1).unwrap();
+        //     sp = sp + 1;
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            ops
-        }
-        StepInfo::BrAdjust { .. } => vec![],
-        StepInfo::Return { drop, keep_values } => {
-            let mut sp = sp_before_execution + 1;
-            let mut ops = vec![];
+        //     ops
+        // }
+        // StepInfo::BrAdjust { .. } => vec![],
+        StepInfo::Return { ..} => vec![],
+        // StepInfo::Return { drop, keep_values } => {
+        //     let mut sp = sp_before_execution + 1;
+        //     let mut ops = vec![];
 
-            {
-                for i in 0..keep_values.len() {
-                    ops.push(MemoryTableEntry {
-                        eid,
-                        emid: *emid,
-                        offset: sp,
-                        ltype: LocationType::Stack,
-                        atype: AccessType::Read,
-                        is_mutable: true,
-                        value: keep_values[i],
-                    });
+        //     {
+        //         for i in 0..keep_values.len() {
+        //             ops.push(MemoryTableEntry {
+        //                 eid,
+        //                 emid: *emid,
+        //                 offset: sp,
+        //                 ltype: LocationType::Stack,
+        //                 atype: AccessType::Read,
+        //                 is_mutable: true,
+        //                 value: keep_values[i],
+        //             });
 
-                    sp = sp + 1;
-                    *emid = (*emid).checked_add(1).unwrap();
-                }
-            }
+        //             sp = sp + 1;
+        //             *emid = (*emid).checked_add(1).unwrap();
+        //         }
+        //     }
 
-            sp += drop;
-            sp -= 1;
+        //     sp += drop;
+        //     sp -= 1;
 
-            {
-                for i in 0..keep_values.len() {
-                    ops.push(MemoryTableEntry {
-                        eid,
-                        emid: *emid,
-                        offset: sp,
-                        ltype: LocationType::Stack,
-                        atype: AccessType::Write,
-                        is_mutable: true,
-                        value: keep_values[i],
-                    });
+        //     {
+        //         for i in 0..keep_values.len() {
+        //             ops.push(MemoryTableEntry {
+        //                 eid,
+        //                 emid: *emid,
+        //                 offset: sp,
+        //                 ltype: LocationType::Stack,
+        //                 atype: AccessType::Write,
+        //                 is_mutable: true,
+        //                 value: keep_values[i],
+        //             });
 
-                    sp = sp - 1;
-                    *emid = (*emid).checked_add(1).unwrap();
-                }
-            }
+        //             sp = sp - 1;
+        //             *emid = (*emid).checked_add(1).unwrap();
+        //         }
+        //     }
 
-            ops
-        }
+        //     ops
+        // }
         StepInfo::Drop { .. } => vec![],
-        StepInfo::Select {
-            val1,
-            val2,
-            cond,
-            result,
-        } => {
-            let mut sp = sp_before_execution + 1;
-            let mut ops = vec![];
+        // StepInfo::Select {
+        //     val1,
+        //     val2,
+        //     cond,
+        //     result,
+        // } => {
+        //     let mut sp = sp_before_execution + 1;
+        //     let mut ops = vec![];
 
-            ops.push(MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *cond,
-            });
-            sp = sp + 1;
-            *emid = (*emid).checked_add(1).unwrap();
+        //     ops.push(MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *cond,
+        //     });
+        //     sp = sp + 1;
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            ops.push(MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *val2,
-            });
-            sp = sp + 1;
-            *emid = (*emid).checked_add(1).unwrap();
+        //     ops.push(MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *val2,
+        //     });
+        //     sp = sp + 1;
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            ops.push(MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *val1,
-            });
+        //     ops.push(MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *val1,
+        //     });
 
-            *emid = (*emid).checked_add(1).unwrap();
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            ops.push(MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *result,
-            });
-            *emid = (*emid).checked_add(1).unwrap();
+        //     ops.push(MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *result,
+        //     });
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            ops
-        }
-        StepInfo::CallInternal { .. } => {
-            vec![]
-        }
-        StepInfo::CallIndirect { func_index, .. } => {
-            let stack_read = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *func_index as u64,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     ops
+        // }
+        // StepInfo::CallInternal { .. } => {
+        //     vec![]
+        // }
+        // StepInfo::CallIndirect { func_index, .. } => {
+        //     let stack_read = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *func_index as u64,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            vec![stack_read]
-        }
+        //     vec![stack_read]
+        // }
         // StepInfo::CallHost {
         //     args,
         //     ret_val,
@@ -381,434 +379,494 @@ pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableE
         //         vec![stack_write]
         //     }
         // },
-        StepInfo::LocalGet { depth, value } => {
-            let read = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + *depth as u32,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        // StepInfo::LocalGet { depth, value } => {
+        //     let read = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + *depth as u32,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let write = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
-            vec![read, write]
-        }
-        StepInfo::SetLocal { depth, value } => {
-            let mut sp = sp_before_execution;
+        //     let write = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
+        //     vec![read, write]
+        // }
+        // StepInfo::SetLocal { depth, value } => {
+        //     let mut sp = sp_before_execution;
 
-            let read = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let read = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            sp += 1;
+        //     sp += 1;
 
-            let write = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp + *depth as u32,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let write = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp + *depth as u32,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            vec![read, write]
-        }
-        StepInfo::TeeLocal { depth, value } => {
-            let read = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
+        //     vec![read, write]
+        // }
+        // StepInfo::TeeLocal { depth, value } => {
+        //     let read = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
 
-            *emid = (*emid).checked_add(1).unwrap();
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let write = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + *depth as u32,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
-            vec![read, write]
-        }
+        //     let write = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + *depth as u32,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
+        //     vec![read, write]
+        // }
 
-        StepInfo::GetGlobal { idx, value, .. } => {
-            let global_get = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: *idx,
-                ltype: LocationType::Global,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        // StepInfo::GetGlobal { idx, value, .. } => {
+        //     let global_get = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: *idx,
+        //         ltype: LocationType::Global,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let stack_write = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let stack_write = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            vec![global_get, stack_write]
-        }
-        StepInfo::SetGlobal { idx, value } => {
-            let stack_read = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     vec![global_get, stack_write]
+        // }
+        // StepInfo::SetGlobal { idx, value } => {
+        //     let stack_read = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let global_set = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: *idx,
-                ltype: LocationType::Global,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let global_set = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: *idx,
+        //         ltype: LocationType::Global,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            vec![stack_read, global_set]
-        }
-        StepInfo::Load {
-            vtype,
-            load_size,
-            raw_address,
-            effective_address,
-            value,
-            block_value1,
-            block_value2,
-            ..
-        } => {
-            let load_address_from_stack = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *raw_address as u64,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     vec![stack_read, global_set]
+        // }
+        // StepInfo::Load {
+        //     vtype,
+        //     load_size,
+        //     raw_address,
+        //     effective_address,
+        //     value,
+        //     block_value1,
+        //     block_value2,
+        //     ..
+        // } => {
+        //     let load_address_from_stack = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *raw_address as u64,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let load_value1 = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: (*effective_address as u32) / 8,
-                ltype: LocationType::Heap,
-                atype: AccessType::Read,
-                // Load u64 from address which align with 8
-                is_mutable: true,
-                // The value will be used to lookup within imtable, hence block_value is given here
-                value: *block_value1,
-            };
+        //     let load_value1 = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: (*effective_address as u32) / 8,
+        //         ltype: LocationType::Heap,
+        //         atype: AccessType::Read,
+        //         // Load u64 from address which align with 8
+        //         is_mutable: true,
+        //         // The value will be used to lookup within imtable, hence block_value is given here
+        //         value: *block_value1,
+        //     };
 
-            let load_value2 = if *effective_address % 8 + load_size.byte_size() > 8 {
-                *emid = (*emid).checked_add(1).unwrap();
-                Some(MemoryTableEntry {
-                    eid,
-                    emid: *emid,
-                    offset: *effective_address as u32 / 8 + 1,
-                    ltype: LocationType::Heap,
-                    atype: AccessType::Read,
-                    is_mutable: true,
-                    // The value will be used to lookup within imtable, hence block_value is given here
-                    value: *block_value2,
-                })
-            } else {
-                None
-            };
+        //     let load_value2 = if *effective_address % 8 + load_size.byte_size() > 8 {
+        //         *emid = (*emid).checked_add(1).unwrap();
+        //         Some(MemoryTableEntry {
+        //             eid,
+        //             emid: *emid,
+        //             offset: *effective_address as u32 / 8 + 1,
+        //             ltype: LocationType::Heap,
+        //             atype: AccessType::Read,
+        //             is_mutable: true,
+        //             // The value will be used to lookup within imtable, hence block_value is given here
+        //             value: *block_value2,
+        //         })
+        //     } else {
+        //         None
+        //     };
 
-            *emid = (*emid).checked_add(1).unwrap();
-            let push_value = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Write,
-                is_mutable: true,
-                value: *value,
-            };
+        //     *emid = (*emid).checked_add(1).unwrap();
+        //     let push_value = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
 
-            vec![
-                vec![load_address_from_stack, load_value1],
-                load_value2.map_or(vec![], |v| vec![v]),
-                vec![push_value],
-            ]
-            .concat()
-        }
-        StepInfo::Store {
-            vtype,
-            store_size,
-            raw_address,
-            effective_address,
-            value,
-            pre_block_value1,
-            updated_block_value1,
-            pre_block_value2,
-            updated_block_value2,
-            ..
-        } => {
-            let load_value_from_stack = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 1,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *value,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     vec![
+        //         vec![load_address_from_stack, load_value1],
+        //         load_value2.map_or(vec![], |v| vec![v]),
+        //         vec![push_value],
+        //     ]
+        //     .concat()
+        // }
+        // StepInfo::Store {
+        //     vtype,
+        //     store_size,
+        //     raw_address,
+        //     effective_address,
+        //     value,
+        //     pre_block_value1,
+        //     updated_block_value1,
+        //     pre_block_value2,
+        //     updated_block_value2,
+        //     ..
+        // } => {
+        //     let load_value_from_stack = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 1,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *value,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let load_address_from_stack = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: sp_before_execution + 2,
-                ltype: LocationType::Stack,
-                atype: AccessType::Read,
-                is_mutable: true,
-                value: *raw_address as u64,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let load_address_from_stack = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: sp_before_execution + 2,
+        //         ltype: LocationType::Stack,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         value: *raw_address as u64,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let load_value1 = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: *effective_address as u32 / 8,
-                ltype: LocationType::Heap,
-                atype: AccessType::Read,
-                is_mutable: true,
-                // The value will be used to lookup within imtable, hence block_value is given here
-                value: *pre_block_value1,
-            };
-            *emid = (*emid).checked_add(1).unwrap();
+        //     let load_value1 = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: *effective_address as u32 / 8,
+        //         ltype: LocationType::Heap,
+        //         atype: AccessType::Read,
+        //         is_mutable: true,
+        //         // The value will be used to lookup within imtable, hence block_value is given here
+        //         value: *pre_block_value1,
+        //     };
+        //     *emid = (*emid).checked_add(1).unwrap();
 
-            let write_value1 = MemoryTableEntry {
-                eid,
-                emid: *emid,
-                offset: *effective_address as u32 / 8,
-                ltype: LocationType::Heap,
-                atype: AccessType::Write,
-                is_mutable: true,
-                // The value will be used to lookup within imtable, hence block_value is given here
-                value: *updated_block_value1,
-            };
+        //     let write_value1 = MemoryTableEntry {
+        //         eid,
+        //         emid: *emid,
+        //         offset: *effective_address as u32 / 8,
+        //         ltype: LocationType::Heap,
+        //         atype: AccessType::Write,
+        //         is_mutable: true,
+        //         // The value will be used to lookup within imtable, hence block_value is given here
+        //         value: *updated_block_value1,
+        //     };
 
-            if *effective_address % 8 + store_size.byte_size() > 8 {
-                *emid = (*emid).checked_add(1).unwrap();
-                let load_value2 = MemoryTableEntry {
-                    eid,
-                    emid: *emid,
-                    offset: *effective_address as u32 / 8 + 1,
-                    ltype: LocationType::Heap,
-                    atype: AccessType::Read,
-                    is_mutable: true,
-                    // The value will be used to lookup within imtable, hence block_value is given here
-                    value: *pre_block_value2,
-                };
+        //     if *effective_address % 8 + store_size.byte_size() > 8 {
+        //         *emid = (*emid).checked_add(1).unwrap();
+        //         let load_value2 = MemoryTableEntry {
+        //             eid,
+        //             emid: *emid,
+        //             offset: *effective_address as u32 / 8 + 1,
+        //             ltype: LocationType::Heap,
+        //             atype: AccessType::Read,
+        //             is_mutable: true,
+        //             // The value will be used to lookup within imtable, hence block_value is given here
+        //             value: *pre_block_value2,
+        //         };
 
-                *emid = (*emid).checked_add(1).unwrap();
-                let write_value2 = MemoryTableEntry {
-                    eid,
-                    emid: *emid,
-                    offset: *effective_address as u32 / 8 + 1,
-                    ltype: LocationType::Heap,
-                    atype: AccessType::Write,
-                    is_mutable: true,
-                    // The value will be used to lookup within imtable, hence block_value is given here
-                    value: *updated_block_value2,
-                };
-                vec![
-                    load_value_from_stack,
-                    load_address_from_stack,
-                    load_value1,
-                    write_value1,
-                    load_value2,
-                    write_value2,
-                ]
-            } else {
-                vec![
-                    load_value_from_stack,
-                    load_address_from_stack,
-                    load_value1,
-                    write_value1,
-                ]
-            }
-        }
-        StepInfo::MemorySize => mem_op_from_stack_only_step(
-            sp_before_execution,
+        //         *emid = (*emid).checked_add(1).unwrap();
+        //         let write_value2 = MemoryTableEntry {
+        //             eid,
+        //             emid: *emid,
+        //             offset: *effective_address as u32 / 8 + 1,
+        //             ltype: LocationType::Heap,
+        //             atype: AccessType::Write,
+        //             is_mutable: true,
+        //             // The value will be used to lookup within imtable, hence block_value is given here
+        //             value: *updated_block_value2,
+        //         };
+        //         vec![
+        //             load_value_from_stack,
+        //             load_address_from_stack,
+        //             load_value1,
+        //             write_value1,
+        //             load_value2,
+        //             write_value2,
+        //         ]
+        //     } else {
+        //         vec![
+        //             load_value_from_stack,
+        //             load_address_from_stack,
+        //             load_value1,
+        //             write_value1,
+        //         ]
+        //     }
+        // }
+        // StepInfo::MemorySize => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[],
+        //     &[event.allocated_memory_pages as u32 as u64],
+        // ),
+        // StepInfo::MemoryGrow { grow_size, result } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*grow_size as u32 as u64],
+        //     &[*result as u32 as u64],
+        // ),
+        // StepInfo::I32Const { value } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[],
+        //     &[*value as u32 as u64],
+        // ),
+        // StepInfo::Const32 { value, addr } => {
+        //     mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
+        // }
+        StepInfo::Const32 { value, addr } => vec![MemoryTableEntry {
             eid,
-            emid,
-            &[],
-            &[event.allocated_memory_pages as u32 as u64],
-        ),
-        StepInfo::MemoryGrow { grow_size, result } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*grow_size as u32 as u64],
-            &[*result as u32 as u64],
-        ),
-        StepInfo::I32Const { value } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[],
-            &[*value as u32 as u64],
-        ),
-        StepInfo::Const32 { value } => {
-            mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
-        }
-        StepInfo::ConstRef { value } => {
-            mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value])
-        }
-        StepInfo::F32Const { value } => {
-            mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
-        }
-        StepInfo::F64Const { value } => {
-            mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
-        }
+            emid: *emid,
+            addr: *addr,
+            ltype: LocationType::Stack,
+            atype: AccessType::Write,
+            is_mutable: false,
+            value: *value as u64,
+        }],
+        // StepInfo::ConstRef { value } => {
+        //     mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value])
+        // }
+        // StepInfo::F32Const { value } => {
+        //     mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
+        // }
+        // StepInfo::F64Const { value } => {
+        //     mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
+        // }
+        // StepInfo::I32BinShiftOp {
+        //     left, right, value, ..
+        // }
+        // | StepInfo::I32BinBitOp {
+        //     left, right, value, ..
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*right as u32 as u64, *left as u32 as u64],
+        //     &[*value as u32 as u64],
+        // ),
+        // StepInfo::I32BinOp {
+        //     left, right, value, ..
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*right as u32 as u64, *left as u32 as u64],
+        //     &[*value as u32 as u64],
+        // ),
         StepInfo::I32BinOp {
-            left, right, value, ..
-        }
-        | StepInfo::I32BinShiftOp {
-            left, right, value, ..
-        }
-        | StepInfo::I32BinBitOp {
-            left, right, value, ..
-        } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*right as u32 as u64, *left as u32 as u64],
-            &[*value as u32 as u64],
-        ),
-        StepInfo::I32Comp {
-            left, right, value, ..
-        } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*right as u32 as u64, *left as u32 as u64],
-            &[*value as u32 as u64],
-        ),
-
-        StepInfo::I64BinOp {
-            left, right, value, ..
-        }
-        | StepInfo::I64BinShiftOp {
-            left, right, value, ..
-        }
-        | StepInfo::I64BinBitOp {
-            left, right, value, ..
-        } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*right as u64, *left as u64],
-            &[*value as u64],
-        ),
-
-        StepInfo::I64Const { value } => {
-            mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
-        }
-        StepInfo::I64Comp {
-            left, right, value, ..
-        } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*right as u64, *left as u64],
-            &[*value as u32 as u64],
-        ),
-        StepInfo::UnaryOp {
-            vtype,
-            operand,
-            result,
-            ..
-        } => mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[*operand], &[*result]),
-        StepInfo::CompZ {
-            vtype,
+            left,
+            right,
             value,
-            result,
-        } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*value],
-            &[*result as u32 as u64],
-        ),
-        StepInfo::I32WrapI64 { value, result } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*value as u64],
-            &[*result as u32 as u64],
-        ),
-        StepInfo::I64ExtendI32 { value, result, .. } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*value as u32 as u64],
-            &[*result as u64],
-        ),
-        StepInfo::I32SignExtendI8 { value, result }
-        | StepInfo::I32SignExtendI16 { value, result } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*value as u32 as u64],
-            &[*result as u32 as u64],
-        ),
-        StepInfo::I64SignExtendI8 { value, result }
-        | StepInfo::I64SignExtendI16 { value, result }
-        | StepInfo::I64SignExtendI32 { value, result } => mem_op_from_stack_only_step(
-            sp_before_execution,
-            eid,
-            emid,
-            &[*value as u64],
-            &[*result as u64],
-        ),
-        _ => vec![],
+            left_addr,
+            right_addr,
+            ..
+        } => {
+            let mut ops = vec![];
+            ops.push(MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: *right_addr,
+                ltype: LocationType::Stack,
+                atype: AccessType::Read,
+                is_mutable: true,
+                value: *right as u32 as u64,
+            });
+
+            *emid = (*emid).checked_add(1).unwrap();
+
+            ops.push(MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: *left_addr,
+                ltype: LocationType::Stack,
+                atype: AccessType::Read,
+                is_mutable: true,
+                value: *left as u32 as u64,
+            });
+
+            *emid = (*emid).checked_add(1).unwrap();
+
+            ops.push(MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: *left_addr,
+                ltype: LocationType::Stack,
+                atype: AccessType::Write,
+                is_mutable: true,
+                value: *value as u32 as u64,
+            });
+
+            ops
+        }
+        // StepInfo::I32Comp {
+        //     left, right, value, ..
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*right as u32 as u64, *left as u32 as u64],
+        //     &[*value as u32 as u64],
+        // ),
+
+        // StepInfo::I64BinOp {
+        //     left, right, value, ..
+        // }
+        // | StepInfo::I64BinShiftOp {
+        //     left, right, value, ..
+        // }
+        // | StepInfo::I64BinBitOp {
+        //     left, right, value, ..
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*right as u64, *left as u64],
+        //     &[*value as u64],
+        // ),
+
+        // StepInfo::I64Const { value } => {
+        //     mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[], &[*value as u64])
+        // }
+        // StepInfo::I64Comp {
+        //     left, right, value, ..
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*right as u64, *left as u64],
+        //     &[*value as u32 as u64],
+        // ),
+        // StepInfo::UnaryOp {
+        //     vtype,
+        //     operand,
+        //     result,
+        //     ..
+        // } => mem_op_from_stack_only_step(sp_before_execution, eid, emid, &[*operand], &[*result]),
+        // StepInfo::CompZ {
+        //     vtype,
+        //     value,
+        //     result,
+        // } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*value],
+        //     &[*result as u32 as u64],
+        // ),
+        // StepInfo::I32WrapI64 { value, result } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*value as u64],
+        //     &[*result as u32 as u64],
+        // ),
+        // StepInfo::I64ExtendI32 { value, result, .. } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*value as u32 as u64],
+        //     &[*result as u64],
+        // ),
+        // StepInfo::I32SignExtendI8 { value, result }
+        // | StepInfo::I32SignExtendI16 { value, result } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*value as u32 as u64],
+        //     &[*result as u32 as u64],
+        // ),
+        // StepInfo::I64SignExtendI8 { value, result }
+        // | StepInfo::I64SignExtendI16 { value, result }
+        // | StepInfo::I64SignExtendI32 { value, result } => mem_op_from_stack_only_step(
+        //     sp_before_execution,
+        //     eid,
+        //     emid,
+        //     &[*value as u64],
+        //     &[*result as u64],
+        // ),
+        _ => unimplemented!("{:?}", event.step_info),
     }
 }

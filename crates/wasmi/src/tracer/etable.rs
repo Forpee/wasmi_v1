@@ -8,7 +8,7 @@ pub fn from_untyped_value_to_u64_with_typ(vtype: VarType, val: UntypedValue) -> 
         VarType::I64 => val.to_bits(),
         VarType::F32 => val.to_bits(),
         VarType::F64 => val.to_bits(),
-        _=> panic!("Unsupported type"),
+        _ => panic!("Unsupported type"),
     }
 }
 
@@ -60,6 +60,8 @@ pub enum RunInstructionTracePre {
     GrowMemory(i32),
 
     I32BinOp {
+        left_addr: usize,
+        right_addr: usize,
         left: i32,
         right: i32,
     },
@@ -407,6 +409,7 @@ pub enum StepInfo {
         value: i32,
     },
     Const32 {
+        addr: usize,
         value: u32,
     },
     ConstRef {
@@ -421,6 +424,8 @@ pub enum StepInfo {
         left: i32,
         right: i32,
         value: i32,
+        left_addr: usize,
+        right_addr: usize,
     },
     I32BinShiftOp {
         class: ShiftOp,
