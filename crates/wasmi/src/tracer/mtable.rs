@@ -40,8 +40,7 @@ pub struct MTable(Vec<MemoryTableEntry>);
 
 impl MTable {
     pub fn new(entries: Vec<MemoryTableEntry>, imtable: &IMTable) -> Self {
-        let mut mtable = MTable(entries);
-        mtable.push_accessed_memory_initialization(imtable);
+        let mtable = MTable(entries);
         mtable
     }
 
