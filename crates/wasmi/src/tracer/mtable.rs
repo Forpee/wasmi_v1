@@ -71,6 +71,14 @@ impl MTable {
     pub fn entries(&self) -> &Vec<MemoryTableEntry> {
         &self.0
     }
+
+    pub fn get_heap_entries(&self) -> Vec<MemoryTableEntry> {
+        self.0
+            .iter()
+            .filter(|entry| entry.ltype == LocationType::Heap)
+            .cloned()
+            .collect()
+    }
 }
 
 // fn mem_op_from_stack_only_step(
@@ -116,6 +124,7 @@ impl MTable {
 
 pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableEntry> {
     let eid = event.eid;
+    let sp_before_execution = 0;
 
     match &event.step_info {
         // StepInfo::Br { offset, .. } => {
@@ -508,171 +517,171 @@ pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableE
 
         //     vec![stack_read, global_set]
         // }
-        // StepInfo::Load {
-        //     vtype,
-        //     load_size,
-        //     raw_address,
-        //     effective_address,
-        //     value,
-        //     block_value1,
-        //     block_value2,
-        //     ..
-        // } => {
-        //     let load_address_from_stack = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: sp_before_execution + 1,
-        //         ltype: LocationType::Stack,
-        //         atype: AccessType::Read,
-        //         is_mutable: true,
-        //         value: *raw_address as u64,
-        //     };
-        //     *emid = (*emid).checked_add(1).unwrap();
+        StepInfo::Load {
+            vtype,
+            load_size,
+            raw_address,
+            effective_address,
+            value,
+            block_value1,
+            block_value2,
+            ..
+        } => {
+            let load_address_from_stack = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: sp_before_execution + 1,
+                ltype: LocationType::Stack,
+                atype: AccessType::Read,
+                is_mutable: true,
+                value: *raw_address as u64,
+            };
+            *emid = (*emid).checked_add(1).unwrap();
 
-        //     let load_value1 = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: (*effective_address as u32) / 8,
-        //         ltype: LocationType::Heap,
-        //         atype: AccessType::Read,
-        //         // Load u64 from address which align with 8
-        //         is_mutable: true,
-        //         // The value will be used to lookup within imtable, hence block_value is given here
-        //         value: *block_value1,
-        //     };
+            let load_value1 = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: (*effective_address) / 8,
+                ltype: LocationType::Heap,
+                atype: AccessType::Read,
+                // Load u64 from address which align with 8
+                is_mutable: true,
+                // The value will be used to lookup within imtable, hence block_value is given here
+                value: *block_value1,
+            };
 
-        //     let load_value2 = if *effective_address % 8 + load_size.byte_size() > 8 {
-        //         *emid = (*emid).checked_add(1).unwrap();
-        //         Some(MemoryTableEntry {
-        //             eid,
-        //             emid: *emid,
-        //             offset: *effective_address as u32 / 8 + 1,
-        //             ltype: LocationType::Heap,
-        //             atype: AccessType::Read,
-        //             is_mutable: true,
-        //             // The value will be used to lookup within imtable, hence block_value is given here
-        //             value: *block_value2,
-        //         })
-        //     } else {
-        //         None
-        //     };
+            let load_value2 = if *effective_address % 8 + load_size.byte_size() > 8 {
+                *emid = (*emid).checked_add(1).unwrap();
+                Some(MemoryTableEntry {
+                    eid,
+                    emid: *emid,
+                    addr: *effective_address / 8 + 1,
+                    ltype: LocationType::Heap,
+                    atype: AccessType::Read,
+                    is_mutable: true,
+                    // The value will be used to lookup within imtable, hence block_value is given here
+                    value: *block_value2,
+                })
+            } else {
+                None
+            };
 
-        //     *emid = (*emid).checked_add(1).unwrap();
-        //     let push_value = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: sp_before_execution + 1,
-        //         ltype: LocationType::Stack,
-        //         atype: AccessType::Write,
-        //         is_mutable: true,
-        //         value: *value,
-        //     };
+            *emid = (*emid).checked_add(1).unwrap();
+            let push_value = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: sp_before_execution + 1,
+                ltype: LocationType::Stack,
+                atype: AccessType::Write,
+                is_mutable: true,
+                value: *value,
+            };
 
-        //     vec![
-        //         vec![load_address_from_stack, load_value1],
-        //         load_value2.map_or(vec![], |v| vec![v]),
-        //         vec![push_value],
-        //     ]
-        //     .concat()
-        // }
-        // StepInfo::Store {
-        //     vtype,
-        //     store_size,
-        //     raw_address,
-        //     effective_address,
-        //     value,
-        //     pre_block_value1,
-        //     updated_block_value1,
-        //     pre_block_value2,
-        //     updated_block_value2,
-        //     ..
-        // } => {
-        //     let load_value_from_stack = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: sp_before_execution + 1,
-        //         ltype: LocationType::Stack,
-        //         atype: AccessType::Read,
-        //         is_mutable: true,
-        //         value: *value,
-        //     };
-        //     *emid = (*emid).checked_add(1).unwrap();
+            vec![
+                vec![load_address_from_stack, load_value1],
+                load_value2.map_or(vec![], |v| vec![v]),
+                vec![push_value],
+            ]
+            .concat()
+        }
+        StepInfo::Store {
+            vtype,
+            store_size,
+            raw_address,
+            effective_address,
+            value,
+            pre_block_value1,
+            updated_block_value1,
+            pre_block_value2,
+            updated_block_value2,
+            ..
+        } => {
+            let load_value_from_stack = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: sp_before_execution + 1,
+                ltype: LocationType::Stack,
+                atype: AccessType::Read,
+                is_mutable: true,
+                value: *value,
+            };
+            *emid = (*emid).checked_add(1).unwrap();
 
-        //     let load_address_from_stack = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: sp_before_execution + 2,
-        //         ltype: LocationType::Stack,
-        //         atype: AccessType::Read,
-        //         is_mutable: true,
-        //         value: *raw_address as u64,
-        //     };
-        //     *emid = (*emid).checked_add(1).unwrap();
+            let load_address_from_stack = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: sp_before_execution + 2,
+                ltype: LocationType::Stack,
+                atype: AccessType::Read,
+                is_mutable: true,
+                value: *raw_address as u64,
+            };
+            *emid = (*emid).checked_add(1).unwrap();
 
-        //     let load_value1 = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: *effective_address as u32 / 8,
-        //         ltype: LocationType::Heap,
-        //         atype: AccessType::Read,
-        //         is_mutable: true,
-        //         // The value will be used to lookup within imtable, hence block_value is given here
-        //         value: *pre_block_value1,
-        //     };
-        //     *emid = (*emid).checked_add(1).unwrap();
+            let load_value1 = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: *effective_address / 8,
+                ltype: LocationType::Heap,
+                atype: AccessType::Read,
+                is_mutable: true,
+                // The value will be used to lookup within imtable, hence block_value is given here
+                value: *pre_block_value1,
+            };
+            *emid = (*emid).checked_add(1).unwrap();
 
-        //     let write_value1 = MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: *effective_address as u32 / 8,
-        //         ltype: LocationType::Heap,
-        //         atype: AccessType::Write,
-        //         is_mutable: true,
-        //         // The value will be used to lookup within imtable, hence block_value is given here
-        //         value: *updated_block_value1,
-        //     };
+            let write_value1 = MemoryTableEntry {
+                eid,
+                emid: *emid,
+                addr: *effective_address / 8,
+                ltype: LocationType::Heap,
+                atype: AccessType::Write,
+                is_mutable: true,
+                // The value will be used to lookup within imtable, hence block_value is given here
+                value: *updated_block_value1,
+            };
 
-        //     if *effective_address % 8 + store_size.byte_size() > 8 {
-        //         *emid = (*emid).checked_add(1).unwrap();
-        //         let load_value2 = MemoryTableEntry {
-        //             eid,
-        //             emid: *emid,
-        //             offset: *effective_address as u32 / 8 + 1,
-        //             ltype: LocationType::Heap,
-        //             atype: AccessType::Read,
-        //             is_mutable: true,
-        //             // The value will be used to lookup within imtable, hence block_value is given here
-        //             value: *pre_block_value2,
-        //         };
+            if *effective_address % 8 + store_size.byte_size() > 8 {
+                *emid = (*emid).checked_add(1).unwrap();
+                let load_value2 = MemoryTableEntry {
+                    eid,
+                    emid: *emid,
+                    addr: *effective_address / 8 + 1,
+                    ltype: LocationType::Heap,
+                    atype: AccessType::Read,
+                    is_mutable: true,
+                    // The value will be used to lookup within imtable, hence block_value is given here
+                    value: *pre_block_value2,
+                };
 
-        //         *emid = (*emid).checked_add(1).unwrap();
-        //         let write_value2 = MemoryTableEntry {
-        //             eid,
-        //             emid: *emid,
-        //             offset: *effective_address as u32 / 8 + 1,
-        //             ltype: LocationType::Heap,
-        //             atype: AccessType::Write,
-        //             is_mutable: true,
-        //             // The value will be used to lookup within imtable, hence block_value is given here
-        //             value: *updated_block_value2,
-        //         };
-        //         vec![
-        //             load_value_from_stack,
-        //             load_address_from_stack,
-        //             load_value1,
-        //             write_value1,
-        //             load_value2,
-        //             write_value2,
-        //         ]
-        //     } else {
-        //         vec![
-        //             load_value_from_stack,
-        //             load_address_from_stack,
-        //             load_value1,
-        //             write_value1,
-        //         ]
-        //     }
-        // }
+                *emid = (*emid).checked_add(1).unwrap();
+                let write_value2 = MemoryTableEntry {
+                    eid,
+                    emid: *emid,
+                    addr: *effective_address / 8 + 1,
+                    ltype: LocationType::Heap,
+                    atype: AccessType::Write,
+                    is_mutable: true,
+                    // The value will be used to lookup within imtable, hence block_value is given here
+                    value: *updated_block_value2,
+                };
+                vec![
+                    load_value_from_stack,
+                    load_address_from_stack,
+                    load_value1,
+                    write_value1,
+                    load_value2,
+                    write_value2,
+                ]
+            } else {
+                vec![
+                    load_value_from_stack,
+                    load_address_from_stack,
+                    load_value1,
+                    write_value1,
+                ]
+            }
+        }
         // StepInfo::MemorySize => mem_op_from_stack_only_step(
         //     sp_before_execution,
         //     eid,
@@ -867,6 +876,6 @@ pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableE
         //     &[*value as u64],
         //     &[*result as u64],
         // ),
-        _ => unimplemented!("{:?}", event.step_info),
+        _ => vec![],
     }
 }
