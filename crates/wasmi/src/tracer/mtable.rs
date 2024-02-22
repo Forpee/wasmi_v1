@@ -72,12 +72,15 @@ impl MTable {
         &self.0
     }
 
-    pub fn get_heap_entries(&self) -> Vec<MemoryTableEntry> {
-        self.0
+    pub fn get_heap_entries(&self) -> Self {
+        let entries = self
+            .0
             .iter()
             .filter(|entry| entry.ltype == LocationType::Heap)
             .cloned()
-            .collect()
+            .collect();
+
+        MTable(entries)
     }
 }
 
