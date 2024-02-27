@@ -1696,7 +1696,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::Sub,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1716,7 +1716,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::Mul,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1736,7 +1736,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::SignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1756,7 +1756,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::UnsignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1776,7 +1776,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::SignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1796,7 +1796,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 } = pre_status.unwrap()
                 {
                     StepInfo::I32BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::UnsignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
@@ -1967,7 +1967,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64Sub => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::Sub,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
@@ -1979,7 +1979,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64Mul => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::Mul,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
@@ -1991,7 +1991,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64DivS => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::SignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
@@ -2003,7 +2003,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64DivU => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::UnsignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
@@ -2015,7 +2015,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64RemS => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::SignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
@@ -2027,7 +2027,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             Instruction::I64RemU => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinOp {
-                        class: BinOp::Add,
+                        class: BinOp::UnsignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i64,
