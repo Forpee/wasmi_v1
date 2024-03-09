@@ -77,6 +77,6 @@ impl Tracer {
             .collect::<Vec<Vec<_>>>()
             .concat();
 
-        MTable::new(mentries, &self.imtable)
+        MTable::new(mentries)
     }
 }

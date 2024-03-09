@@ -39,7 +39,7 @@ pub struct MemoryTableEntry {
 pub struct MTable(Vec<MemoryTableEntry>);
 
 impl MTable {
-    pub fn new(entries: Vec<MemoryTableEntry>, imtable: &IMTable) -> Self {
+    pub fn new(entries: Vec<MemoryTableEntry>) -> Self {
         let mtable = MTable(entries);
         mtable
     }
