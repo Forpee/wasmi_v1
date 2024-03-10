@@ -309,18 +309,13 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             }),
 
             Instruction::Return(drop_keep) => {
-                let mut drop_values = vec![];
                 let mut keep_values: Vec<u64> = vec![];
 
                 let drop = drop_keep.drop();
                 let keep = drop_keep.keep();
 
-                for i in 1..=drop {
-                    drop_values.push(self.sp.nth_back(i.into()));
-                }
-
-                for i in drop + 1..=drop + keep {
-                    keep_values.push(self.sp.nth_back(i.into()).into());
+                for i in 1..=keep {
+                    keep_values.push(self.sp.nth_back(i.into()).to_bits());
                 }
 
                 Some(RunInstructionTracePre::Return {
@@ -692,8 +687,6 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             | Instruction::I32Rotr => Some(RunInstructionTracePre::I32BinOp {
                 left: self.sp.nth_back(2).to_bits() as i32,
                 right: self.sp.nth_back(1).to_bits() as i32,
-                left_addr: self.sp.into_sub(2).get_addr(),
-                right_addr: self.sp.into_sub(1).get_addr(),
             }),
             Instruction::I64Add
             | Instruction::I64Sub
@@ -905,13 +898,10 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
         instruction: &Instruction,
     ) -> StepInfo {
         match *instruction {
-            Instruction::LocalGet(local_depth) => {
-                let value = self.sp.last();
-                StepInfo::LocalGet {
-                    depth: local_depth.to_usize(),
-                    value: self.sp.last().to_bits(),
-                }
-            }
+            Instruction::LocalGet(local_depth) => StepInfo::LocalGet {
+                depth: local_depth.to_usize(),
+                value: self.sp.last().to_bits(),
+            },
             Instruction::LocalSet(..) => {
                 if let RunInstructionTracePre::SetLocal { depth, value } = pre_status.unwrap() {
                     StepInfo::SetLocal {
@@ -1245,7 +1235,6 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 value: self.const_pool.get(const_ref).unwrap_or_default().into(),
             },
             Instruction::Const32(value) => StepInfo::Const32 {
-                addr: self.sp.into_sub(1).get_addr(),
                 value: u32::from_ne_bytes(value),
             },
             Instruction::I64Const32(value) => StepInfo::I64Const {
@@ -1668,153 +1657,91 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
             }
 
             Instruction::I32Add => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::Add,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32Sub => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::Sub,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32Mul => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::Mul,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32DivS => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::SignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32DivU => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::UnsignedDiv,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32RemS => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::SignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32RemU => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinOp {
                         class: BinOp::UnsignedRem,
                         left,
                         right,
                         value: self.sp.last().to_bits() as i32,
-                        left_addr,
-                        right_addr,
                     }
                 } else {
                     unreachable!()
                 }
             }
             Instruction::I32And => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinBitOp {
                         class: BitOp::And,
                         left,
@@ -1826,13 +1753,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32Or => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinBitOp {
                         class: BitOp::Or,
                         left,
@@ -1844,13 +1765,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32Xor => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinBitOp {
                         class: BitOp::Xor,
                         left,
@@ -1862,13 +1777,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32Shl => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::Shl,
                         left,
@@ -1880,13 +1789,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32ShrS => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::SignedShr,
                         left,
@@ -1898,13 +1801,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32ShrU => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::UnsignedShr,
                         left,
@@ -1916,13 +1813,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32Rotl => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::Rotl,
                         left,
@@ -1934,13 +1825,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                 }
             }
             Instruction::I32Rotr => {
-                if let RunInstructionTracePre::I32BinOp {
-                    left,
-                    right,
-                    left_addr,
-                    right_addr,
-                } = pre_status.unwrap()
-                {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::Rotr,
                         left,
@@ -2725,46 +2610,6 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                     unreachable!()
                 }
             }
-            // Instruction::I32ReinterpretF32 => {
-            //     if let RunInstructionTracePre::I32ReinterpretF32 { value } = pre_status.unwrap() {
-            //         StepInfo::I32ReinterpretF32 {
-            //             value,
-            //             result: self.sp.last().into(),
-            //         }
-            //     } else {
-            //         unreachable!()
-            //     }
-            // }
-            // Instruction::I64ReinterpretF64 => {
-            //     if let RunInstructionTracePre::I64ReinterpretF64 { value } = pre_status.unwrap() {
-            //         StepInfo::I64ReinterpretF64 {
-            //             value,
-            //             result: self.sp.last().into(),
-            //         }
-            //     } else {
-            //         unreachable!()
-            //     }
-            // }
-            // Instruction::F32ReinterpretI32 => {
-            //     if let RunInstructionTracePre::F32ReinterpretI32 { value } = pre_status.unwrap() {
-            //         StepInfo::F32ReinterpretI32 {
-            //             value,
-            //             result: self.sp.last().into(),
-            //         }
-            //     } else {
-            //         unreachable!()
-            //     }
-            // }
-            // Instruction::F64ReinterpretI64 => {
-            //     if let RunInstructionTracePre::F64ReinterpretI64 { value } = pre_status.unwrap() {
-            //         StepInfo::F64ReinterpretI64 {
-            //             value,
-            //             result: self.sp.last().into(),
-            //         }
-            //     } else {
-            //         unreachable!()
-            //     }
-            // }
             Instruction::I64ExtendI32S | Instruction::I64ExtendI32U => {
                 if let RunInstructionTracePre::I64ExtendI32 { value, sign } = pre_status.unwrap() {
                     StepInfo::I64ExtendI32 {
@@ -2851,7 +2696,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                     .get_memory(DEFAULT_MEMORY_INDEX)
                     .is_some()
             };
-
+            let pre_sp = self.sp.clone();
             let pages = if has_default_memory {
                 self.ctx
                     .resolve_memory(self.cache.default_memory(self.ctx))
@@ -2868,7 +2713,7 @@ impl<'ctx, 'engine> Executor<'ctx, 'engine> {
                             let mut tracer = tracer.borrow_mut();
                             let post_status =
                                 self.execute_instruction_post(pre_status, &instruction_copy);
-                            tracer.etable.push(pages, post_status);
+                            tracer.etable.push(pages, post_status, pre_sp);
                         }
                     }
                 }};

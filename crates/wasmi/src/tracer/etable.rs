@@ -1,5 +1,10 @@
 use wasmi_core::UntypedValue;
 
+use crate::{
+    engine::stack::ValueStackPtr,
+    mtable::{memory_event_of_step, MTable},
+};
+
 use super::imtable::{MemoryReadSize, MemoryStoreSize, VarType};
 
 pub fn from_untyped_value_to_u64_with_typ(vtype: VarType, val: UntypedValue) -> u64 {
@@ -60,8 +65,6 @@ pub enum RunInstructionTracePre {
     GrowMemory(i32),
 
     I32BinOp {
-        left_addr: usize,
-        right_addr: usize,
         left: i32,
         right: i32,
     },
@@ -409,7 +412,6 @@ pub enum StepInfo {
         value: i32,
     },
     Const32 {
-        addr: usize,
         value: u32,
     },
     ConstRef {
@@ -424,8 +426,6 @@ pub enum StepInfo {
         left: i32,
         right: i32,
         value: i32,
-        left_addr: usize,
-        right_addr: usize,
     },
     I32BinShiftOp {
         class: ShiftOp,
@@ -622,11 +622,16 @@ pub struct ETEntry {
     pub eid: u32,
     pub allocated_memory_pages: usize,
     pub step_info: StepInfo,
+    pub sp: ValueStackPtr,
 }
 #[derive(Debug, Default)]
 pub struct ETable(Vec<ETEntry>);
 
 impl ETable {
+    pub fn new(entries: Vec<ETEntry>) -> Self {
+        ETable(entries)
+    }
+
     pub fn entries(&self) -> &Vec<ETEntry> {
         &self.0
     }
@@ -634,13 +639,25 @@ impl ETable {
     pub fn entries_mut(&mut self) -> &mut Vec<ETEntry> {
         &mut self.0
     }
-    pub fn push(&mut self, allocated_memory_pages: u32, step_info: StepInfo) {
+    pub fn push(&mut self, allocated_memory_pages: u32, step_info: StepInfo, sp: ValueStackPtr) {
         let et_entry = ETEntry {
             eid: (self.entries().len() + 1).try_into().unwrap(),
             allocated_memory_pages: allocated_memory_pages as usize,
             step_info,
+            sp,
         };
 
         self.entries_mut().push(et_entry.clone());
+    }
+
+    pub fn get_mtable(&self) -> MTable {
+        let mentries = self
+            .entries()
+            .iter()
+            .map(|eentry| memory_event_of_step(eentry, &mut 1))
+            .collect::<Vec<Vec<_>>>()
+            .concat();
+
+        MTable::new(mentries)
     }
 }
