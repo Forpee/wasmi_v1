@@ -114,25 +114,7 @@ pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableE
         StepInfo::BrIfEqz { .. } => vec![],
         StepInfo::BrIfNez { .. } => vec![],
         StepInfo::BrTable {..} => vec![],
-        // StepInfo::BrTable { index, offset, .. } => {
-        //     let mut sp = sp_before_execution + 1;
-
-        //     let ops = vec![MemoryTableEntry {
-        //         eid,
-        //         emid: *emid,
-        //         offset: sp,
-        //         ltype: LocationType::Stack,
-        //         atype: AccessType::Read,
-        //         is_mutable: true,
-        //         value: *index as u32 as u64,
-        //     }];
-
-        //     sp = sp + 1;
-        //     *emid = (*emid).checked_add(1).unwrap();
-
-        //     ops
-        // }
-        // StepInfo::BrAdjust { .. } => vec![],
+        StepInfo::BrAdjust { .. } => vec![],
         StepInfo::Return { drop, keep_values } => {
             let mut ops = vec![];
             for i in 0..keep_values.len() {
