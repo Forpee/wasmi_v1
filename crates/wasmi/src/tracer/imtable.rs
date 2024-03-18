@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use wasmi_core::ValueType;
 
 use super::mtable::LocationType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum MemoryReadSize {
     U8 = 1,
     S8,
@@ -29,9 +30,38 @@ impl MemoryReadSize {
             MemoryReadSize::F64 => 8,
         }
     }
+
+    pub fn encode(self) -> u8 {
+        match self {
+            MemoryReadSize::U8 => 0,
+            MemoryReadSize::S8 => 1,
+            MemoryReadSize::U16 => 2,
+            MemoryReadSize::S16 => 3,
+            MemoryReadSize::U32 => 4,
+            MemoryReadSize::S32 => 5,
+            MemoryReadSize::I64 => 6,
+            MemoryReadSize::F32 => 7,
+            MemoryReadSize::F64 => 8,
+        }
+    }
+
+    pub fn decode(byte: u8) -> Self {
+        match byte {
+            0 => Self::U8,
+            1 => Self::S8,
+            2 => Self::U16,
+            3 => Self::S16,
+            4 => Self::U32,
+            5 => Self::S32,
+            6 => Self::I64,
+            7 => Self::F32,
+            8 => Self::F64,
+            _ => panic!("invalid type"),
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum MemoryStoreSize {
     Byte8 = 1,
     Byte16,
@@ -48,9 +78,28 @@ impl MemoryStoreSize {
             MemoryStoreSize::Byte64 => 8,
         }
     }
+
+    pub fn encode(self) -> u8 {
+        match self {
+            Self::Byte8 => 0,
+            Self::Byte16 => 1,
+            Self::Byte32 => 2,
+            Self::Byte64 => 3,
+        }
+    }
+
+    pub fn decode(byte: u8) -> Self {
+        match byte {
+            0 => Self::Byte8,
+            1 => Self::Byte16,
+            2 => Self::Byte32,
+            3 => Self::Byte64,
+            _ => panic!("invalid type"),
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum VarType {
     I64 = 0,
     I32 = 1,
@@ -58,6 +107,20 @@ pub enum VarType {
     F64 = 3,
     FuncRef = 4,
     ExternRef = 5,
+}
+
+impl VarType {
+    pub fn decode(byte: u8) -> Self {
+        match byte {
+            0 => VarType::I64,
+            1 => VarType::I32,
+            2 => VarType::F32,
+            3 => VarType::F64,
+            4 => VarType::FuncRef,
+            5 => VarType::ExternRef,
+            _ => panic!("invalid type"),
+        }
+    }
 }
 
 impl From<ValueType> for VarType {
