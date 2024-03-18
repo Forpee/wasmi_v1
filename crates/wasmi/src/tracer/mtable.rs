@@ -113,7 +113,7 @@ pub fn memory_event_of_step(event: &ETEntry, emid: &mut u32) -> Vec<MemoryTableE
         StepInfo::Br { .. } => vec![],
         StepInfo::BrIfEqz { .. } => vec![],
         StepInfo::BrIfNez { .. } => vec![],
-        StepInfo::BrTable {..} => vec![],
+        StepInfo::BrTable { .. } => vec![],
         StepInfo::BrAdjust { .. } => vec![],
         StepInfo::Return { drop, keep_values } => {
             let mut ops = vec![];

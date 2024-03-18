@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use wasmi_core::ValueType;
 
 use super::mtable::LocationType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum MemoryReadSize {
     U8 = 1,
     S8,
@@ -31,7 +32,7 @@ impl MemoryReadSize {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum MemoryStoreSize {
     Byte8 = 1,
     Byte16,
@@ -50,7 +51,7 @@ impl MemoryStoreSize {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum VarType {
     I64 = 0,
     I32 = 1,

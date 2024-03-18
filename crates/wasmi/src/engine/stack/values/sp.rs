@@ -2,22 +2,62 @@ use crate::{
     core::{TrapCode, UntypedValue},
     engine::DropKeep,
 };
+use serde::{Deserialize, Serialize};
 
 /// A pointer on the [`ValueStack`].
 ///
 /// Allows for efficient mutable access to the values of the [`ValueStack`].
 ///
 /// [`ValueStack`]: super::ValueStack
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(transparent)]
 pub struct ValueStackPtr {
     ptr: *mut UntypedValue,
+}
+
+impl Serialize for ValueStackPtr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let test: u64 = self.ptr as u64;
+        serializer.serialize_u64(test)
+    }
 }
 
 impl From<*mut UntypedValue> for ValueStackPtr {
     #[inline]
     fn from(ptr: *mut UntypedValue) -> Self {
         Self { ptr }
+    }
+}
+
+use serde::de::{self, Visitor};
+
+struct ValueStackPtrVisitor;
+
+impl<'de> Visitor<'de> for ValueStackPtrVisitor {
+    type Value = ValueStackPtr;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("64-bit unsigned integer")
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        let ptr = value as *mut UntypedValue;
+        Ok(ValueStackPtr { ptr })
+    }
+}
+
+impl<'de> Deserialize<'de> for ValueStackPtr {
+    fn deserialize<D>(deserializer: D) -> Result<ValueStackPtr, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_u64(ValueStackPtrVisitor)
     }
 }
 

@@ -18,11 +18,12 @@ use core::{
     ops::{Neg, Shl, Shr},
 };
 use paste::paste;
+use serde::{Deserialize, Serialize};
 
 /// An untyped value.
 ///
 /// Provides a dense and simple interface to all functional Wasm operations.
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[repr(transparent)]
 pub struct UntypedValue {
     /// This inner value is required to have enough bits to represent

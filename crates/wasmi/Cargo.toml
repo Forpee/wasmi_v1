@@ -25,6 +25,8 @@ smallvec = { version = "1.10.0", features = ["union"] }
 multi-stash = { version = "0.2.0" }
 anyhow = "1.0"
 wat = "1"
+serde = { version = "1.0.197", features = ["derive"] }
+rayon = "1.9.0"
 
 [dev-dependencies]
 assert_matches = "1.5"

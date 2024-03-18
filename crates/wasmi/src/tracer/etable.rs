@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use wasmi_core::UntypedValue;
 
 use crate::{
@@ -17,6 +18,7 @@ pub fn from_untyped_value_to_u64_with_typ(vtype: VarType, val: UntypedValue) -> 
     }
 }
 
+#[derive(Deserialize, Serialize)]
 pub enum RunInstructionTracePre {
     BrIfEqz {
         value: i32,
@@ -198,7 +200,7 @@ pub enum RunInstructionTracePre {
     },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum UnaryOp {
     Ctz,
     Clz,
@@ -212,7 +214,7 @@ pub enum UnaryOp {
     Sqrt,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BinOp {
     Add,
     Sub,
@@ -226,7 +228,8 @@ pub enum BinOp {
     SignedDiv,
     SignedRem,
 }
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum ShiftOp {
     Shl,
     UnsignedShr,
@@ -235,7 +238,7 @@ pub enum ShiftOp {
     Rotr,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum BitOp {
     And = 0,
     Or = 1,
@@ -252,7 +255,7 @@ impl BitOp {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum RelOp {
     Eq,
     Ne,
@@ -270,12 +273,12 @@ pub enum RelOp {
     UnsignedLe,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum TestOp {
     Eqz,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum ConversionOp {
     I32WrapI64,
     I64ExtendI32s,
@@ -309,7 +312,7 @@ pub enum ConversionOp {
     F64PromoteF32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub enum StepInfo {
     Br {
         offset: i32,
@@ -617,17 +620,144 @@ pub enum StepInfo {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ETEntry {
     pub eid: u32,
     pub allocated_memory_pages: usize,
     pub step_info: StepInfo,
     pub sp: ValueStackPtr,
 }
+
 #[derive(Debug, Default)]
 pub struct ETable(Vec<ETEntry>);
 
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Shard {
+    eid: u32,
+    allocated_memory_pages: usize,
+    stack_pointer: ValueStackPtr,
+    pub steps: Vec<St>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub enum St {
+    M(usize),
+    I(StepInfo),
+    D(isize),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Step {
+    sd: isize,
+    si: StepInfo,
+}
+
 impl ETable {
+    pub fn into_shards(&self, num_shards: usize) -> Vec<Shard> {
+        let chunk_size = self.0.len() / num_shards;
+        let remainder = self.0.len() % num_shards;
+        let mut chunks = Vec::new();
+
+        let mut start_index = 0;
+        for i in 0..num_shards {
+            let end_index = start_index + chunk_size + if i < remainder { 1 } else { 0 };
+            let chunk = &self.0[start_index..end_index];
+            chunks.push(chunk.to_vec());
+            start_index = end_index;
+        }
+
+        chunks
+            .into_iter()
+            .map(|chunk| {
+                let mut stack_pointer = chunk[0].sp;
+                let num_memory_pages = chunk[0].allocated_memory_pages;
+                let eid = chunk[0].eid;
+
+                let mut shard = Shard {
+                    eid,
+                    allocated_memory_pages: num_memory_pages,
+                    stack_pointer,
+                    steps: Vec::new(),
+                };
+
+                shard.steps = chunk
+                    .iter()
+                    .map(|step| {
+                        let sp_delta = step.sp.offset_from(stack_pointer);
+                        stack_pointer = step.sp;
+
+                        let mut v = Vec::new();
+
+                        if num_memory_pages != step.allocated_memory_pages {
+                            v.push(St::M(step.allocated_memory_pages));
+                        }
+
+                        if sp_delta != 0 {
+                            v.push(St::D(sp_delta));
+                        }
+
+                        v.push(St::I(step.step_info.clone()));
+                        v
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>();
+
+                shard
+            })
+            .collect()
+    }
+
+    pub fn from_shards(shards: Vec<Shard>) -> Self {
+        assert!(!shards.is_empty());
+
+        let mut entries: Vec<ETEntry> = Vec::new();
+
+        for shard in shards.into_iter() {
+            let mut allocated_memory_pages = shard.allocated_memory_pages;
+            let mut stack_pointer = shard.stack_pointer;
+            let eid = shard.eid;
+            let mut index = 0;
+
+            let shard_entries = shard
+                .steps
+                .into_iter()
+                .filter_map(|step| match step {
+                    St::I(step_info) => Some(ETEntry {
+                        eid: {
+                            let prev = index;
+                            index += 1;
+                            eid + prev
+                        },
+                        allocated_memory_pages,
+                        sp: stack_pointer,
+                        step_info,
+                    }),
+                    St::M(mem) => {
+                        allocated_memory_pages = mem;
+                        None
+                    }
+                    St::D(delta) => {
+                        if delta < 0 {
+                            stack_pointer = stack_pointer.into_sub(delta.abs() as usize);
+                        } else if delta > 0 {
+                            stack_pointer = stack_pointer.into_add(delta as usize);
+                        }
+
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            entries.extend(shard_entries);
+        }
+
+        Self(entries)
+    }
+
+    pub fn from_shard(shard: Shard) -> Self {
+        Self::from_shards(vec![shard])
+    }
+
     pub fn new(entries: Vec<ETEntry>) -> Self {
         ETable(entries)
     }
